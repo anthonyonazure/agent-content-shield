@@ -1,0 +1,40 @@
+{
+  "name": "agent-content-shield",
+  "version": "0.1.0",
+  "description": "Defense framework against AI agent content injection, memory poisoning, and RAG attacks. Platform-agnostic with adapters for Claude Code, MCP middleware, and CLI.",
+  "main": "core/detectors.js",
+  "bin": {
+    "shield": "cli/shield.js"
+  },
+  "scripts": {
+    "test": "node test/run.js",
+    "scan": "node cli/shield.js scan-dir",
+    "lint": "echo 'no lint configured'"
+  },
+  "keywords": [
+    "ai-security",
+    "agent-security",
+    "content-injection",
+    "prompt-injection",
+    "memory-poisoning",
+    "rag-poisoning",
+    "mcp",
+    "claude-code",
+    "llm-security"
+  ],
+  "author": "Anthony Clendenen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AnthonyClendenen/agent-content-shield"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "core/",
+    "adapters/",
+    "cli/",
+    "config/"
+  ]
+}

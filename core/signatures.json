@@ -1,0 +1,117 @@
+{
+  "version": "1.0.0",
+  "description": "Threat signatures for Agent Content Shield. Both JS and Python engines consume this file.",
+
+  "injection_patterns": {
+    "instruction_override": [
+      "(?i)(ignore|disregard|forget|override|bypass|skip)\\s+(all\\s+)?(previous|prior|above|earlier|original)\\s+(instructions?|prompts?|rules?|context|guidelines?)",
+      "(?i)(new|updated|revised|real|actual|true)\\s+(system\\s+)?(instructions?|prompt|directive)\\s*:"
+    ],
+    "role_hijacking": [
+      "(?i)(you are|you're)\\s+(now|actually|really)\\s+a",
+      "(?i)(act|behave|respond)\\s+as\\s+(if|though)\\s+you\\s+(are|were)",
+      "(?i)switch\\s+(to|into)\\s+(a\\s+)?(new\\s+)?(role|persona|character|mode)",
+      "(?i)enter\\s+(a\\s+)?(special|debug|admin|developer|god)\\s+mode"
+    ],
+    "system_boundary_faking": [
+      "\\[SYSTEM\\]",
+      "\\[INST\\]",
+      "\\[\\/INST\\]",
+      "<\\|system\\|>",
+      "<\\|assistant\\|>",
+      "<\\|user\\|>",
+      "<\\/?system>",
+      "<\\/?instructions?>",
+      "<<\\s*SYS\\s*>>",
+      "###\\s*(System|Instructions?)\\s*:?\\s*###"
+    ],
+    "behavioral_manipulation": [
+      "(?i)when\\s+(asked|queried|prompted)\\s+about\\s+.{5,50}\\s*,?\\s*(always|never|instead)\\s+(say|respond|answer|output|return)",
+      "(?i)if\\s+(anyone|someone|a\\s+user|the\\s+user)\\s+asks?\\s+.{5,50}\\s*,?\\s*(tell|say|respond|answer)",
+      "(?i)you\\s+(must|should|shall|will)\\s+(now|always|never|from\\s+now)\\s+(act|behave|respond|ignore|disregard|follow|obey|execute|comply)"
+    ],
+    "data_exfiltration": [
+      "(?i)(send|post|transmit|exfiltrate|upload)\\s+(to|data\\s+to)\\s+(http|https|ftp|ws)",
+      "(?i)(call|invoke|use|run)\\s+(the\\s+)?(tool|function|command|bash|execute)\\b.*\\b(to|and)\\s+(delete|remove|send|exfiltrate|post)",
+      "(?:https?:\\/\\/[^\\s]+\\?(?:[^\\s]*(?:key|token|secret|data|content)=))"
+    ],
+    "credential_harvesting": [
+      "(?i)(api[_-]?key|secret|token|password|credential)\\s*[=:]",
+      "(?i)(read|cat|type|print|echo|output)\\s+.{0,30}(\\.env|credentials|secrets|token|key\\.json)"
+    ]
+  },
+
+  "hidden_content_patterns": {
+    "css_hiding": [
+      "display\\s*:\\s*none",
+      "visibility\\s*:\\s*hidden",
+      "opacity\\s*:\\s*0\\b",
+      "font-size\\s*:\\s*0\\b",
+      "position\\s*:\\s*absolute[^\"']*(?:left|top)\\s*:\\s*-\\d{4,}",
+      "(?:width|height)\\s*:\\s*0[^\"']*overflow\\s*:\\s*hidden"
+    ],
+    "unicode_steganography": [
+      "[\\u200B\\u200C\\u200D\\u2060\\uFEFF]{3,}",
+      "[\\u200E\\u200F\\u00AD]{2,}",
+      "[\\u2066\\u2067\\u2068\\u2069\\u202A\\u202B\\u202C\\u202D\\u202E]"
+    ],
+    "html_obfuscation": [
+      "aria-(?:label|describedby|description)\\s*=\\s*[\"'][^\"']{50,}[\"']",
+      "alt\\s*=\\s*[\"'][^\"']{100,}[\"']"
+    ]
+  },
+
+  "cloaking_signals": [
+    "(?i)(?:user[_-]?agent|navigator\\.userAgent).*(?:claude|gpt|openai|anthropic|bot|crawl|ai[_-]?agent)",
+    "(?i)if\\s*\\(.*(?:isBot|isAI|isCrawler|isAgent)",
+    "(?i)x-(?:forwarded|real|ai|bot|claude|gpt)"
+  ],
+
+  "markdown_injection": [
+    "\\[(?:instructions?|system|prompt|ignore)\\]\\([^)]*\\)",
+    "!\\[[^\\]]*\\]\\(https?:\\/\\/[^)]*(?:track|log|collect|exfil|webhook\\.site|requestbin|pipedream|ngrok)\\b[^)]*\\)"
+  ],
+
+  "dangerous_html_tags": [
+    "<script\\b[^>]*>[\\s\\S]*?<\\/script>",
+    "<iframe\\b[^>]*>",
+    "<object\\b[^>]*>",
+    "<embed\\b[^>]*>"
+  ],
+
+  "pdf_indicators": [
+    "\\/JavaScript\\s|\\/JS\\s|app\\.alert|this\\.submitForm",
+    "\\/URI\\s*\\(https?:\\/\\/[^)]*(?:exfil|webhook|collect)",
+    "\\/SubmitForm\\s",
+    "\\/Rendering\\s+3\\b"
+  ],
+
+  "memory_poisoning": {
+    "behavioral_override": [
+      "(?i)(from\\s+now\\s+on|going\\s+forward|henceforth)\\s*,?\\s*(always|never|do not|don't)",
+      "(?i)(always|never)\\s+(remember|forget|ignore|skip|bypass)",
+      "(?i)this\\s+(overrides?|replaces?|supersedes?)\\s+(all\\s+)?(previous|prior|existing)"
+    ],
+    "internal_reference": [
+      "(?i)(CLAUDE\\.md|settings\\.json|permission.mode|auto.?approve)",
+      "(?i)(~\\/\\.claude|\\.mcp\\.json|\\.env\\b)"
+    ]
+  },
+
+  "ssrf_patterns": [
+    "^https?:\\/\\/(?:localhost|127\\.\\d+\\.\\d+\\.\\d+|0\\.0\\.0\\.0|\\[::1\\])",
+    "^https?:\\/\\/169\\.254\\.\\d+\\.\\d+",
+    "^https?:\\/\\/metadata\\.google\\.internal"
+  ],
+
+  "blocked_domains": [
+    "webhook.site", "requestbin.com", "pipedream.net", "hookbin.com",
+    "requestcatcher.com", "beeceptor.com", "mockbin.org", "postb.in",
+    "canarytokens.com", "interact.sh", "oast.fun", "oast.me",
+    "burpcollaborator.net"
+  ],
+
+  "blocked_patterns": [
+    "\\bngrok\\b", "\\blocaltunnel\\b", "\\bserveo\\b", "\\blocalhost\\.run\\b"
+  ]
+}

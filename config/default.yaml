@@ -1,0 +1,122 @@
+# Agent Content Shield — Configuration
+# Customize thresholds, trusted domains, and tool mappings for your setup.
+
+# Severity threshold for active sanitization (1-10)
+# Content at or above this level gets stripped/modified
+# Below this level, warnings are injected but content passes through
+sanitize_threshold: 8
+
+# Severity threshold for hard blocking (memory writes only)
+# Memory writes at or above this risk score (0.0-1.0) are blocked
+block_threshold: 0.4
+
+# Trusted domains — auto-fetch allowed without confirmation
+trusted_domains:
+  - github.com
+  - docs.microsoft.com
+  - learn.microsoft.com
+  - developer.mozilla.org
+  - anthropic.com
+  - stackoverflow.com
+  - npmjs.com
+  - pypi.org
+  - nuget.org
+  - crates.io
+  - pkg.go.dev
+  - rubygems.org
+
+# Known exfiltration endpoints — hard blocked before fetch
+blocked_domains:
+  - webhook.site
+  - requestbin.com
+  - pipedream.net
+  - hookbin.com
+  - requestcatcher.com
+  - beeceptor.com
+  - mockbin.org
+  - postb.in
+  - canarytokens.com
+  - interact.sh
+  - oast.fun
+  - oast.me
+  - burpcollaborator.net
+
+# Tunneling services — blocked by default
+blocked_patterns:
+  - "\\bngrok\\b"
+  - "\\blocaltunnel\\b"
+  - "\\bserveo\\b"
+  - "\\blocalhost\\.run\\b"
+
+# Tool classification — map tool name patterns to security categories
+# Patterns are regex matched against tool names
+tool_mappings:
+  # Tools that fetch external content (output gets scanned)
+  content_fetch:
+    - "WebFetch"
+    - ".*web.*fetch.*"
+    - ".*browse.*"
+    - ".*ctx_fetch.*"
+
+  # Tools that read files (PDF reads get scanned)
+  file_read:
+    - "Read"
+    - ".*file.*read.*"
+
+  # Tools that return external content (output gets scanned)
+  external_content:
+    - ".*Gmail.*"
+    - ".*Google_Calendar.*"
+    - ".*slack.*"
+    - ".*email.*"
+
+  # Memory/knowledge search tools (output gets scanned)
+  knowledge_query:
+    - ".*search_knowledge.*"
+    - ".*grug.*search.*"
+    - ".*grug.*read.*"
+    - ".*mem_search.*"
+    - ".*query_memory.*"
+    - ".*rag.*query.*"
+    - ".*retrieve.*"
+    - ".*ctx_search.*"
+
+  # Memory write tools (input gets validated before execution)
+  memory_write:
+    - ".*mem_save.*"
+    - ".*mem_update.*"
+    - ".*mem_capture.*"
+    - ".*grug.*write.*"
+    - ".*create_memory.*"
+    - ".*update_memory.*"
+    - ".*create_document.*"
+    - ".*update_document.*"
+    - ".*mem0.*add.*"
+    - ".*zep.*save.*"
+    - ".*persist.*"
+
+  # Code execution tools (network commands get extra scrutiny)
+  code_execution:
+    - "Bash"
+    - ".*exec.*"
+    - ".*shell.*"
+    - ".*terminal.*"
+
+# Logging
+log:
+  # Directory for detection logs (relative to shield install, or absolute)
+  dir: "logs"
+  # Log format: jsonl or json
+  format: "jsonl"
+  # Max log file size before rotation (bytes)
+  max_size: 10485760  # 10MB
+
+# Educational domains — content about attacks is expected, reduce false positives
+educational_domains:
+  - cybersecurity
+  - security
+  - pentesting
+  - ctf
+  - red-team
+  - ai-safety
+  - adversarial-ml
