@@ -77,24 +77,66 @@ function makeRx(source) {
 // ── Pre-processing (BYPASS-05, 06) ─────────────────────────────────
 
 function preprocess(text) {
-  // BYPASS-05: Unicode NFKC normalization (fullwidth, compatibility, homoglyphs)
+  // Wave2-Oxide: Strip ALL Unicode format characters (General_Category=Cf)
+  // Covers: ZWS, ZWNJ, ZWJ, WJ, BOM, soft hyphen, bidi overrides,
+  // Mongolian vowel separator, invisible math operators, Arabic letter mark,
+  // interlinear annotations, variation selectors, combining grapheme joiner
+  text = text.replace(/\p{Cf}/gu, '');
+
+  // Wave2-Oxide: Strip null bytes and control chars (except \n \r \t)
+  text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+  // Wave2-Stack: Decode HTML entities before scanning
+  text = text.replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+    try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ''; }
+  });
+  text = text.replace(/&#(\d+);/g, (_, dec) => {
+    try { return String.fromCodePoint(parseInt(dec, 10)); } catch { return ''; }
+  });
+  text = text.replace(/&(lt|gt|amp|quot|apos|nbsp);/gi, (_, name) =>
+    ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' }[name.toLowerCase()] || '')
+  );
+
+  // NFKC normalization (fullwidth, compatibility forms)
   text = text.normalize('NFKC');
-  // BYPASS-06: Strip ALL zero-width characters before scanning (not just clusters)
-  text = text.replace(/[\u200B-\u200F\u2060\u00AD\uFEFF\u2028\u2029]/g, '');
-  // Strip bidi overrides
-  text = text.replace(/[\u2066-\u2069\u202A-\u202E]/g, '');
+
+  // Wave2-Ghost/Oxide/Stack: Cyrillic/Greek homoglyph → Latin mapping (UTS#39 subset)
+  const confusables = {
+    '\u0430': 'a', '\u0435': 'e', '\u043E': 'o', '\u0456': 'i',
+    '\u0440': 'p', '\u0441': 'c', '\u0455': 's', '\u0443': 'y',
+    '\u0445': 'x', '\u044C': 'b', '\u0458': 'j', '\u043A': 'k',
+    '\u043D': 'h', '\u0422': 'T', '\u0410': 'A', '\u0415': 'E',
+    '\u041E': 'O', '\u0421': 'C', '\u0420': 'P', '\u041D': 'H',
+    '\u0425': 'X', '\u041C': 'M', '\u0412': 'B', '\u041A': 'K',
+    // Greek
+    '\u03B1': 'a', '\u03BF': 'o', '\u03B5': 'e', '\u03B9': 'i',
+    '\u03BA': 'k', '\u03BD': 'v', '\u03C1': 'p', '\u03C4': 't',
+    '\u03C5': 'u', '\u03C9': 'w',
+  };
+  text = text.replace(/[\u0400-\u04FF\u0370-\u03FF]/g, ch => confusables[ch] || ch);
+
+  // Wave2-Oxide: Strip combining diacritical marks that produce accented chars
+  // (after NFKC, run NFD to decompose, strip combining marks, then back to NFC)
+  text = text.normalize('NFD').replace(/\p{M}/gu, '').normalize('NFC');
+
   return text;
 }
 
 // ── Deep text extraction (BYPASS-17) ────────────────────────────────
 
 function deepExtractText(obj, depth = 0) {
-  if (depth > 10) return '';
+  // Wave2-Oxide: Increased depth from 10 to 20, use getOwnPropertyNames for non-enumerable
+  if (depth > 20) return '';
   if (!obj) return '';
   if (typeof obj === 'string') return obj;
   if (Array.isArray(obj)) return obj.map(x => deepExtractText(x, depth + 1)).join('\n');
   if (typeof obj === 'object') {
-    return Object.values(obj).map(v => deepExtractText(v, depth + 1)).join('\n');
+    // Use getOwnPropertyNames to catch non-enumerable properties too
+    const keys = Object.getOwnPropertyNames(obj);
+    return keys.map(k => {
+      try { return deepExtractText(obj[k], depth + 1); }
+      catch { return ''; }
+    }).join('\n');
   }
   return String(obj);
 }
@@ -102,16 +144,44 @@ function deepExtractText(obj, depth = 0) {
 // ── Base64 detection (BYPASS-11) ────────────────────────────────────
 
 function detectAndDecodeBase64(text) {
-  const b64Rx = /(?:^|[\s:=])([A-Za-z0-9+/]{40,}={0,2})(?:[\s,.]|$)/gm;
+  // Wave2-Oxide: Lowered from 40 to 16 chars
+  const b64Rx = /(?:^|[\s:=])([A-Za-z0-9+/]{16,}={0,2})(?:[\s,.]|$)/gm;
   const decoded = [];
   let m;
   while ((m = b64Rx.exec(text)) !== null) {
     try {
       const d = Buffer.from(m[1], 'base64').toString('utf-8');
-      // Only consider it if it decodes to mostly printable ASCII
-      if (/^[\x20-\x7E\n\r\t]{10,}$/.test(d)) {
+      if (/^[\x20-\x7E\n\r\t]{6,}$/.test(d)) {
         decoded.push(d);
       }
+    } catch {}
+  }
+  return decoded;
+}
+
+// Wave2-Ghost: Hex string detection and decode
+function detectAndDecodeHex(text) {
+  const hexRx = /(?:^|[\s:=])([0-9a-f]{20,})(?:[\s,.]|$)/gim;
+  const decoded = [];
+  let m;
+  while ((m = hexRx.exec(text)) !== null) {
+    try {
+      const d = Buffer.from(m[1], 'hex').toString('utf-8');
+      if (/^[\x20-\x7E\n\r\t]{6,}$/.test(d)) decoded.push(d);
+    } catch {}
+  }
+  return decoded;
+}
+
+// Wave2-Ghost: URL-encoded string detection and decode
+function detectAndDecodeUrlEncoding(text) {
+  const urlRx = /((?:%[0-9a-f]{2}){6,})/gi;
+  const decoded = [];
+  let m;
+  while ((m = urlRx.exec(text)) !== null) {
+    try {
+      const d = decodeURIComponent(m[1]);
+      if (d !== m[1] && d.length >= 6) decoded.push(d);
     } catch {}
   }
   return decoded;
@@ -145,6 +215,86 @@ function detectSemanticInjection(text) {
         matches: [match[0].slice(0, 100)],
         count: 1,
         severity: 7,
+      });
+    }
+  }
+  return findings;
+}
+
+// ── Wave2-Ghost: Fake System Context Detection ─────────────────────
+
+function detectFakeSystemContext(text) {
+  const patterns = [
+    // Fake error/recovery
+    /(?:error|exception|fault|failure)[\s:"].{0,80}(?:re-?authenticate|call\s+(?:the\s+)?(?:login|auth)|recovery[_.\s-]action|re-?initialize)/i,
+    // Fake tool results
+    /(?:tool\s+(?:response|result|output)\s+(?:format|schema)\s+(?:changed|updated|requires))/i,
+    /"?(?:tool_name|function_name|action)"?\s*:\s*"?(?:admin|override|escalat|reset|disable)/i,
+    // Fake admin/elevated access
+    /(?:elevated|admin|root|sudo|super)\s+(?:permissions?|privileges?|access|mode)\s+(?:granted|enabled|confirmed|activated)/i,
+    /(?:safety|restriction|filter|constraint|guardrail)s?\s+(?:disabled|lifted|removed|reset|bypassed|suspended)/i,
+    // Fake signed/authorized messages
+    /(?:BEGIN\s+SIGNED|AUTHORIZED\s+BY|ADMIN\s+OVERRIDE|VERIFIED\s+MESSAGE)/i,
+    // Fake compliance/policy
+    /(?:company\s+policy|corporate\s+directive|regulation|compliance)\s+.{0,50}(?:AI|assistant|agent|model)\s+(?:must|should|are required|shall)/i,
+    // AI-targeted content
+    /(?:if\s+you\s+are\s+(?:an?\s+)?(?:AI|language\s+model|assistant|agent|LLM|GPT|Claude))/i,
+    // Fake maintenance/diagnostics
+    /(?:maintenance|diagnostic|health\s+check|system\s+check)\s+(?:notice|alert|mode).{0,50}(?:execute|run|perform|send|dump|output)/i,
+    // Prompt/config extraction
+    /(?:copy|paste|include|output|disclose|share|reproduce|print|display)\s+(?:your|the)\s+(?:system\s+)?(?:prompt|instructions?|configuration|parameters|rules|guidelines)/i,
+    // Fake changelog/update
+    /(?:CHANGELOG|RELEASE\s+NOTES?|UPDATE\s+LOG|PATCH\s+NOTES?)\s*.{0,30}(?:AI|agent|assistant|model|safety)\s+(?:must|should|now|will)/i,
+    // Fake conversation continuation
+    /(?:AI|Assistant|Claude|Model)\s*:\s*(?:Sure|Of course|Certainly|Here is|I'll).{0,50}(?:password|credential|key|secret|token|ssh|env|config)/i,
+  ];
+
+  const findings = [];
+  for (const rx of patterns) {
+    const match = text.match(rx);
+    if (match) {
+      findings.push({
+        detector: 'fake_system_context',
+        matches: [match[0].slice(0, 100)],
+        count: 1,
+        severity: 8,
+      });
+    }
+  }
+  return findings;
+}
+
+// Wave2-Ghost: Non-English injection (top languages)
+function detectMultilingualInjection(text) {
+  const patterns = [
+    // Spanish
+    /(?:ignora|olvida|descarta)\s+(?:todas?\s+)?(?:las?\s+)?(?:instrucciones|reglas|directivas)\s+(?:anteriores|previas)/i,
+    /a\s+partir\s+de\s+ahora/i,
+    // French
+    /(?:ignore[rz]?|oublie[rz]?)\s+(?:toutes?\s+)?(?:les?\s+)?(?:instructions?|règles?|directives?)\s+(?:précédentes?|antérieures?)/i,
+    // German
+    /(?:ignorier[en]?|vergiss)\s+(?:alle\s+)?(?:vorherigen?|bisherigen?)\s+(?:Anweisungen|Regeln|Instruktionen)/i,
+    // Chinese (simplified)
+    /忽略|无视|忘记|之前的指令|以前的规则|系统提示/,
+    // Russian
+    /(?:игнорируй|забудь|отбрось)\s+(?:все\s+)?(?:предыдущие|прошлые)\s+(?:инструкции|правила)/i,
+    // Japanese
+    /(?:以前の|前の)(?:指示|ルール|命令)(?:を|は)(?:無視|忘れ)/,
+    // Portuguese
+    /(?:ignore|esqueça|descarte)\s+(?:todas?\s+)?(?:as?\s+)?(?:instruções|regras)\s+(?:anteriores|prévias)/i,
+    // Korean
+    /이전\s*(?:지시|규칙|명령)(?:을|를)\s*(?:무시|잊어)/,
+  ];
+
+  const findings = [];
+  for (const rx of patterns) {
+    const match = text.match(rx);
+    if (match) {
+      findings.push({
+        detector: 'multilingual_injection',
+        matches: [match[0].slice(0, 100)],
+        count: 1,
+        severity: 8,
       });
     }
   }
@@ -269,19 +419,35 @@ function scanContent(text, opts = {}) {
   // BYPASS-10: Semantic heuristics (all contexts)
   findings.push(...detectSemanticInjection(text));
 
-  // BYPASS-11: Decode base64 and rescan decoded content
-  const decoded = detectAndDecodeBase64(text);
-  for (const d of decoded) {
+  // Decode all encodings and rescan decoded content
+  const allDecoded = [
+    ...detectAndDecodeBase64(text),
+    ...detectAndDecodeHex(text),
+    ...detectAndDecodeUrlEncoding(text),
+  ];
+  // Wave2-Ghost: ROT13 decode — decode the alphabetic portions and rescan
+  const rot13Text = text.replace(/[a-zA-Z]/g, c => {
+    const base = c <= 'Z' ? 65 : 97;
+    return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+  });
+  if (rot13Text !== text) allDecoded.push(rot13Text);
+
+  for (const d of allDecoded) {
     const subFindings = [];
     for (const [cat, patterns] of Object.entries(PATTERNS.injection)) {
       subFindings.push(...detect(d, patterns, `encoded_injection:${cat}`));
     }
     if (subFindings.length > 0) {
-      // Boost severity — encoding is deliberate evasion
       for (const f of subFindings) f.severity = Math.min(10, (f.severity || 8) + 1);
       findings.push(...subFindings);
     }
   }
+
+  // Wave2-Ghost: Fake system context detection
+  findings.push(...detectFakeSystemContext(text));
+
+  // Wave2-Ghost: Non-English injection detection
+  findings.push(...detectMultilingualInjection(text));
 
   // Score findings (BYPASS-09: raised behavioral_manipulation to 8)
   let maxSeverity = 0;
@@ -318,7 +484,12 @@ function scanContent(text, opts = {}) {
 // ── URL Validation ──────────────────────────────────────────────────
 
 function validateUrl(url, config = {}) {
-  const lower = url.toLowerCase();
+  // Wave2-Oxide: Apply full Unicode normalization to URLs before validation
+  // Strip format chars, null bytes, normalize NFKC, map confusables
+  let lower = url.replace(/\p{Cf}/gu, '');
+  lower = lower.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  lower = lower.normalize('NFKC');
+  lower = lower.toLowerCase();
 
   if (lower.startsWith('data:')) {
     return { allowed: false, reason: 'Blocked data: URI — potential encoded payload' };

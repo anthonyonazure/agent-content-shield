@@ -332,8 +332,10 @@ def validate_knowledge_doc(
     flags = [f"{f.detector}:{(f.matches or [''])[0][:60]}" for f in result.findings]
 
     # Reduce risk for educational domains (security courses teach about attacks)
+    # Wave2-Viper: Cap discount — never reduce below 0.7x, and never discount severity >= 9
     if domain in educational_domains:
-        risk *= 0.5
+        if result.max_severity < 9:
+            risk = max(risk * 0.7, risk - 0.15)  # Modest discount, can't drop more than 0.15
         if flags:
             flags.append(f"educational_domain_discount:{domain}")
 

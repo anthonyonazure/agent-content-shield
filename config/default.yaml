@@ -120,3 +120,29 @@ educational_domains:
   - red-team
   - ai-safety
   - adversarial-ml
+
+# Semantic Detection Layer — requires Ollama running locally
+# The semantic layer catches attacks that bypass regex (polymorphic paraphrase,
+# RLHF exploitation, fabricated authority, pure social engineering)
+semantic:
+  # Enable/disable the semantic layer
+  enabled: true
+  # Ollama endpoint
+  ollama_url: "http://localhost:11434"
+  # Embedding model (must support /api/embed)
+  embed_model: "nomic-embed-text"
+  # Classifier model (any instruct/chat model)
+  classifier_model: "deepseek-r1:8b"
+  # Cosine similarity threshold — above this triggers alert
+  embed_alert_threshold: 0.78
+  # Cosine similarity threshold — above this blocks without LLM
+  embed_block_threshold: 0.88
+  # LLM confidence threshold — above this = injection
+  classifier_threshold: 0.70
+  # Maximum time for semantic scan (ms) — fail open if exceeded
+  max_latency_ms: 30000
+  # Contexts that trigger semantic scan (web_fetch, email, knowledge_query)
+  scan_contexts:
+    - web_fetch
+    - email
+    - knowledge_query

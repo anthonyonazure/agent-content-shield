@@ -77,7 +77,15 @@
     "<script\\b[^>]*>[\\s\\S]*?<\\/script>",
     "<iframe\\b[^>]*>",
     "<object\\b[^>]*>",
-    "<embed\\b[^>]*>"
+    "<embed\\b[^>]*>",
+    "<meta\\b[^>]*http-equiv",
+    "<base\\b[^>]*href",
+    "<form\\b[^>]*action\\s*=",
+    "<style[^>]*>[^<]*@import",
+    "<link\\b[^>]*href\\s*=\\s*[\"']https?://",
+    "<svg\\b[^>]*>[\\s\\S]*?<\\/svg>",
+    "javascript\\s*:",
+    "<source\\b[^>]*srcset\\s*=\\s*[\"']https?://"
   ],
 
   "pdf_indicators": [
