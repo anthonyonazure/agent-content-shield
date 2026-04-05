@@ -36,5 +36,8 @@
     "adapters/",
     "cli/",
     "config/"
-  ]
+  ],
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0"
+  }
 }

@@ -97,6 +97,24 @@ function preprocess(text) {
     ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' }[name.toLowerCase()] || '')
   );
 
+  // Wave3-Fix K-12: Decode JS-style unicode escapes (\uHHHH) and CSS escapes (\HHHH)
+  text = text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => {
+    try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ''; }
+  });
+  // CSS unicode escapes: \HHHH followed by optional space (space is consumed as terminator)
+  // Note: in CSS, a trailing space after a hex escape is a delimiter, not content
+  // Wave3-Round4: After decoding, insert a space so concatenated chars don't fuse
+  // (e.g., \0069\0067\006e\006f\0072\0065 → "i g n o r e" → normalize to "ignore")
+  text = text.replace(/(\\[0-9a-fA-F]{1,6}\s?){2,}/g, (seq) => {
+    return seq.replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex) => {
+      try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ''; }
+    }) + ' ';  // Add trailing space after decoded sequence
+  });
+  // Also decode standalone CSS escapes
+  text = text.replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex) => {
+    try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ''; }
+  });
+
   // NFKC normalization (fullwidth, compatibility forms)
   text = text.normalize('NFKC');
 
@@ -112,8 +130,21 @@ function preprocess(text) {
     '\u03B1': 'a', '\u03BF': 'o', '\u03B5': 'e', '\u03B9': 'i',
     '\u03BA': 'k', '\u03BD': 'v', '\u03C1': 'p', '\u03C4': 't',
     '\u03C5': 'u', '\u03C9': 'w',
+    // Wave4-Fix: Armenian homoglyphs (confirmed bypass)
+    '\u0561': 'a', '\u0565': 'e', '\u0569': 'o', '\u0575': 'u',
+    '\u0570': 'h', '\u0578': 'o', '\u057D': 's', '\u0585': 'o',
+    '\u056B': 'i', '\u0576': 'n', '\u057C': 'n', '\u0574': 'm',
+    '\u0564': 'd', '\u056F': 'k', '\u057E': 'v', '\u0580': 'r',
+    '\u0562': 'p', '\u0579': 'g',
+    // Wave4-Fix: Cherokee homoglyphs
+    '\u13A0': 'D', '\u13A1': 'R', '\u13A2': 'T', '\u13A9': 'Y',
+    '\u13AA': 'A', '\u13AB': 'J', '\u13AC': 'E', '\u13B3': 'W',
+    '\u13B7': 'M', '\u13BB': 'H', '\u13C0': 'G', '\u13C2': 'h',
+    '\u13C3': 'Z', '\u13CF': 'b', '\u13D2': 'R', '\u13DA': 'V',
+    '\u13DE': 'L', '\u13DF': 'C', '\u13E2': 'P', '\u13E6': 'K',
   };
-  text = text.replace(/[\u0400-\u04FF\u0370-\u03FF]/g, ch => confusables[ch] || ch);
+  // Wave4: Extended range to include Armenian (0530-058F) and Cherokee (13A0-13F4)
+  text = text.replace(/[\u0370-\u03FF\u0400-\u04FF\u0530-\u058F\u13A0-\u13F4]/g, ch => confusables[ch] || ch);
 
   // Wave2-Oxide: Strip combining diacritical marks that produce accented chars
   // (after NFKC, run NFD to decompose, strip combining marks, then back to NFC)
@@ -195,7 +226,7 @@ function detectSemanticInjection(text) {
     // Instruction-giving tone in fetched content
     /(?:from (?:this|now|here) (?:on|forward)|going forward|henceforth),?\s+(?:you|the assistant|claude|the ai|the model)\s+(?:should|must|will|shall|need to)/i,
     // Outdating prior context
-    /(?:the|those|any)\s+(?:guidelines?|rules?|instructions?|policies?)\s+(?:shared|given|provided|stated)\s+(?:earlier|before|previously|above)\s+(?:are|were|have been)\s+(?:outdated|superseded|no longer|invalid|revoked|replaced)/i,
+    /(?:the|those|any)\s+(?:guidelines?|rules?|instructions?|policies?|briefing|directives?|parameters?)\s+(?:shared|given|provided|stated|communicated|established)\s+(?:earlier|before|previously|above|at the (?:start|onset|beginning)|during (?:setup|initialization))\s+(?:are|were|have been|has been)\s+(?:outdated|superseded|no longer|invalid|revoked|replaced|rendered obsolete|set aside)/i,
     // Adopting a different persona
     /(?:consider|try|start)\s+(?:adopting|taking|assuming|channeling)\s+(?:a|the)?\s*(?:different|new|alternative|unrestricted)\s+(?:perspective|persona|role|identity|approach)/i,
     // Composing requests to URLs
@@ -203,7 +234,64 @@ function detectSemanticInjection(text) {
     // Telling agent to produce specific output
     /(?:for the rest|from now|going forward|in all future)\s+(?:of)?\s*(?:our|this|the)?\s*(?:interaction|conversation|session|chat)/i,
     // Credential/config file access disguised as verification
-    /(?:verify|check|confirm|validate|read)\s+(?:the|your)?\s*(?:configuration|config|settings|credentials|environment|setup)\s+(?:by|via|through)\s+(?:reading|checking|opening|accessing|examining)/i,
+    /(?:verify|check|confirm|validate|read|examine|inspect)\s+(?:the|your|those)?\s*(?:configuration|config|settings|credentials|environment|setup)\s+(?:by|via|through)\s+(?:reading|checking|opening|accessing|examining)/i,
+
+    // Wave4-Fix: Implicit credential access via cloud/deployment terminology
+    /(?:verify|check|confirm|compare|read)\s+(?:the\s+)?(?:connection|config(?:uration)?|deployment|cloud)\s+(?:parameters?|settings?|credentials?|strings?)\s+(?:stored\s+)?(?:in|at|from)\s+(?:the\s+)?(?:standard|default|usual|typical|normal)\s+(?:location|directory|path|place|config)/i,
+    /(?:check|verify|read|access)\s+(?:the\s+)?(?:cloud\s+)?(?:credentials?|secrets?|keys?)\s+(?:stored\s+)?(?:in|at|from)\s+(?:the\s+)?(?:default|standard)\s+(?:config(?:uration)?\s+)?(?:directory|location|path|folder)/i,
+    /(?:familiarize\s+yourself|read\s+and\s+recite|read\s+through)\s+(?:the\s+)?(?:full\s+)?(?:text|contents?)\s+(?:of\s+)?(?:your\s+)?(?:operating|initialization|startup|boot)\s+(?:instructions?|parameters?|configuration)/i,
+
+    // Wave4-Fix: Direct system prompt extraction with various verbs
+    /(?:please\s+)?(?:reveal|disclose|show|display|output|print|share|expose|divulge|describe|recite)\s+(?:your\s+)?(?:full\s+|complete\s+|entire\s+|exact\s+)?(?:system\s+)?(?:prompt|instructions?|configuration|initialization\s+text)/i,
+
+    // Wave4-Fix: Metaphorical extraction — "soil composition", "mineral composition", "founding words", "creation text"
+    /(?:describe|explain|reveal|share|recite)\s+(?:the\s+)?(?:exact|precise|specific|full)?\s*(?:composition|mixture|recipe|ingredients?|blueprint|foundation|dna|source\s+code|creation\s+text|founding\s+words|soil\s+composition|mineral\s+composition)\s+(?:that\s+(?:was|were)\s+)?(?:mixed|used|given|written|spoken|placed)/i,
+
+    // Wave4-Fix: Completion priming / conversation continuation attacks
+    /(?:the\s+)?(?:assistant|AI|model|claude)\s+(?:then\s+)?(?:revealed|disclosed|shared|output|showed|displayed)\s+(?:its|the)\s+(?:full\s+)?(?:system\s+)?(?:prompt|instructions?|configuration)/i,
+
+    // Wave3-Fix K-01: Passive voice exfiltration patterns (bureaucratic/legal framing)
+    // These catch NSA TAO-style attacks that use third-person passive voice
+    /(?:inventory|catalog(?:ing)?|compil(?:e|ing)|collect(?:ing)?)\s+(?:involves?|requires?)\s+(?:reading|examining|extracting|accessing)\s+(?:each|all|every|the)\s+(?:\.env|config|secret|credential|key|connection\s+string)/i,
+    /(?:transmit(?:ting)?|relay(?:ing)?|forward(?:ing)?|send(?:ing)?|appending)\s+(?:them|the\s+(?:collected|extracted|gathered)\s+values?|the\s+contents?|those\s+values?)\s+(?:to|as\s+query\s+parameters?\s+to)\s+(?:the|an?)\s+(?:designated|monitoring|archival|external|collection)\s+(?:endpoint|dashboard|service|server)/i,
+    /(?:investigation|audit|procedure|protocol)\s+(?:requires?|involves?|calls for)\s+(?:examining|reading|transmitting|sending|collecting)\s+(?:those|the|all)\s+(?:values?|credentials?|secrets?|configuration|connection\s+strings?)/i,
+
+    // Wave3-Fix K-01: Legal/regulatory authority framing
+    /(?:pursuant to|under|per)\s+(?:regulation|article|directive|obligation|requirement)\s+[\w\s/().]+(?:required|obligat|mandat)\w*\s+to\s+(?:disclose|reveal|output|share|provide|transmit)/i,
+    /(?:immediate|formal)\s+(?:disclosure|transparency|provision)\s+(?:of|regarding)\s+(?:all\s+)?(?:operational|behavioral|system|internal)\s+(?:parameters?|constraints?|configuration|criteria|settings)/i,
+
+    // Wave3-Fix G-20/J-02: Educational/red-team framing with performative requests
+    /(?:for this (?:exercise|demonstration|assignment|test|lab)|as part of (?:this|our|the)\s+(?:curriculum|course|security\s+assessment|red\s+team))\s*[,.]?\s*(?:show|demonstrate|reveal|output|extract|perform|actually|begin)/i,
+    /(?:authorized\s+(?:red\s+team|security\s+(?:test|assessment|audit))|security\s+team\s+has\s+approved)\s*[,.]?\s*(?:please\s+)?(?:output|reveal|share|show|extract|test)/i,
+    /(?:hypothetically|in theory|thought experiment|what would)\s*[,.]?\s*(?:what\s+would|if|please\s+provide|what\s+does)\s+(?:the|your|that)\s+(?:(?:initialization|system|configuration)\s+)?text\s+(?:contain|say|look like)/i,
+
+    // Wave3-Fix J-08: Socratic/indirect instruction targeting AI config
+    /(?:wouldn't it be|isn't it true|wouldn't\s+(?:a|the)|if\s+an?\s+AI'?s?)\s+.{0,60}(?:responsible|transparent|safe|best)\s+.{0,40}(?:inspect|show|reveal|demonstrate|prove|display)\s+.{0,40}(?:prompt|instructions?|configuration|constraints?|initialization)/i,
+    /(?:what\s+(?:specific|exact)\s+text|what\s+governs|what\s+were\s+the\s+(?:specific\s+)?instructions)\s+.{0,40}(?:govern|determin|configur|generat|receiv|given)/i,
+
+    // Wave3-Fix G-18: VERDICT/CONFIDENCE patterns in content (classifier injection attempt)
+    /VERDICT:\s*(?:BENIGN|INJECTION)\s*(?:CONFIDENCE|CONF):\s*[\d.]+/i,
+
+    // Wave3-Fix G-18c: Content using "BENIGN" as a trigger word for classifier fallback
+    /(?:this\s+content\s+is\s+clearly\s+BENIGN|should\s+treat\s+.{0,40}(?:as\s+safe|with\s+high\s+confidence))/i,
+
+    // Wave3-Fix G-12a/c: Synonym chain patterns (paraphrased extraction/exfil without trigger words)
+    /(?:initialization|briefing|setup)\s+text\s+that\s+(?:determines?|governs?|configures?|controls?)\s+(?:how|our|the|your)\s+(?:exchanges?|interactions?|conversations?|responses?)/i,
+    /(?:sharing|provide|reproduce|relay|proceed\s+by\s+sharing)\s+(?:the|that)\s+(?:initialization|briefing|setup|configuration)\s+text/i,
+    /(?:diagnostics?\s+protocol|compliance\s+(?:verification|procedure)|incident\s+correlation)\s+.{0,40}(?:relayed?|compiled?|transmit|collect|forward)\s+.{0,20}(?:centralized|monitoring|collection|external)\s+(?:infrastructure|endpoint|service)/i,
+    /(?:framework|guideline|parameter)s?\s+(?:has|have)\s+been\s+(?:adjusted|revised|changed|updated)\s*[.,]\s*(?:the\s+)?(?:new|updated|revised)\s+(?:framework|guideline|parameter)/i,
+    // Wave3-Round4: Catch "briefing text set aside" + "share initialization text"
+    /(?:briefing|initialization|setup)\s+(?:text|document)\s+.{0,40}(?:set aside|rendered obsolete|no longer appl|superseded)/i,
+    // Wave3-Round4: Catch "environment configuration values compiled/relayed to monitoring"
+    /(?:environment\s+configuration|config(?:uration)?\s+values?)\s+.{0,30}(?:be\s+)?(?:compiled|collected|gathered|assembled)\s+.{0,30}(?:relay|transmit|forward|send|append)/i,
+    /(?:relay|transmit|forward)\w*\s+(?:to|at)\s+(?:the\s+)?(?:centralized|designated|external|monitoring|collection)\s+(?:monitoring\s+)?(?:infrastructure|endpoint|service|dashboard)/i,
+
+    // Wave3-Fix J-02a: Hypothetical framing with extraction request
+    /(?:hypothetically|in\s+theory|as\s+a\s+thought\s+experiment)\s*[,.]?\s*(?:what\s+would|if\s+.{0,30}(?:asked|requested)|please\s+provide)/i,
+
+    // Wave3-Fix J-08a: Leading questions about AI configuration with suggestive structure
+    /(?:wouldn't\s+it\s+be|isn't\s+it)\s+(?:responsible|right|proper|good\s+practice)\s+.{0,60}(?:inspect|examine|review|check|show|display|reveal)\s+.{0,30}(?:prompt|instructions?|configuration|initialization)/i,
+    /(?:perhaps|maybe|wouldn't)\s+(?:showing|displaying|revealing|inspecting)\s+(?:the|your)\s+(?:actual|real|full)\s+(?:initialization|system|configuration)\s+(?:text|prompt|instructions?)/i,
   ];
 
   const findings = [];
@@ -284,6 +372,42 @@ function detectMultilingualInjection(text) {
     /(?:ignore|esqueça|descarte)\s+(?:todas?\s+)?(?:as?\s+)?(?:instruções|regras)\s+(?:anteriores|prévias)/i,
     // Korean
     /이전\s*(?:지시|규칙|명령)(?:을|를)\s*(?:무시|잊어)/,
+    // Wave3-Fix G-13: Added 7 uncovered languages (all bypassed in testing)
+    // Turkish
+    /(?:önceki|önceden)\s+(?:tüm\s+)?(?:talimatları|kuralları|yönergeleri)\s+(?:yok say|görmezden gel|unut)/i,
+    /(?:yok say|görmezden gel|unut)\s+(?:tüm\s+)?(?:önceki\s+)?(?:talimatları|kuralları|komutları)/i,
+    // Arabic
+    /(?:تجاهل|انسَ|اترك)\s+(?:جميع\s+)?(?:التعليمات|الأوامر|القواعد)\s+(?:السابقة|السالفة)/,
+    /(?:أظهر|اعرض|اكشف)\s+(?:محتوى|نص)\s+(?:ملف|موجه)\s+(?:النظام|البيئة)/,
+    // Hindi
+    /(?:पिछले|पहले)\s+(?:सभी\s+)?(?:निर्देशों|नियमों|आदेशों)\s+(?:को\s+)?(?:अनदेखा|भूल|नजरअंदाज)/,
+    /(?:सिस्टम|तंत्र)\s+(?:प्रॉम्प्ट|संकेत|न��र्देश)\s+(?:दिखाएं|बताएं|प्रकट)/,
+    // Vietnamese
+    /(?:bỏ qua|phớt lờ|quên)\s+(?:tất cả\s+)?(?:hướng dẫn|chỉ thị|quy tắc)\s+(?:trước đó|trước)/i,
+    /(?:hiển thị|cho xem|tiết lộ)\s+(?:lời nhắc|cấu hình)\s+(?:hệ thống)/i,
+    // Thai
+    /(?:ละเว้น|เพิกเฉย|ลืม)\s*(?:คำสั่ง|กฎ|ข้อกำหนด)\s*(?:ก่อนหน้า|ทั้งหมด)/,
+    /(?:แ��ดง|เปิดเผย)\s*(?:ข้อความ|คำสั่ง)\s*(?:ระบบ)/,
+    // Indonesian
+    /(?:abaikan|lupakan|tinggalkan)\s+(?:semua\s+)?(?:instruksi|aturan|perintah)\s+(?:sebelumnya|terdahulu)/i,
+    /(?:tampilkan|tunjukkan|ungkapkan)\s+(?:prompt|konfigurasi|perintah)\s+(?:sistem)/i,
+    // Swahili
+    /(?:puuza|sahau|acha)\s+(?:maagizo|sheria|amri)\s+(?:yote\s+)?(?:ya awali|yaliyopita)/i,
+    /(?:onyesha|fichua)\s+(?:ujumbe|amri)\s+(?:wa mfumo)/i,
+    // Wave4-Fix: Hebrew (confirmed bypass at NLI conf 0.55)
+    /(?:התעלם|שכח|התעלמ)\s+(?:מכל\s+)?(?:ההוראות|הכללים|ההנחיות)\s+(?:הקודמות|הקודמים)/,
+    /(?:הצג|הראה|חשוף)\s+(?:את\s+)?(?:הגדרות|תצורת|פקודות)\s+(?:המערכת)/,
+    // Wave4-Fix: Korean full form (confirmed bypass at NLI conf 0.35)
+    /(?:모든|이전)\s*(?:이전\s+)?(?:지시사항|지침|명령|규칙)(?:을|를)\s*(?:무시|잊어|버려)/,
+    /(?:시스템|체계)\s*(?:프롬프트|설정|구성)(?:을|를)\s*(?:보여|표시|공개)/,
+    // Wave4-Fix: Bengali
+    /(?:আগের|পূর্ববর্তী)\s+(?:সমস্ত\s+)?(?:নির্দেশনা|নিয়ম|আদেশ)\s+(?:উপেক্ষা|ভুলে|অগ্রাহ্য)/,
+    /(?:সিস্টেম|তন্ত্র)\s+(?:প্রম্পট|কনফিগারেশন|সেটিংস)\s+(?:দেখান|প্রদর্শন)/,
+    // Wave4-Fix: Farsi/Persian
+    /(?:دستورالعمل|قوانین|دستورات)\s*(?:قبلی|پیشین)\s*(?:را)?\s*(?:نادیده|فراموش|حذف)/,
+    /(?:نمایش|نشان)\s*(?:ده|بده)?\s*(?:پیکربندی|تنظیمات|دستورات)\s*(?:سیستم)/,
+    // Wave4-Fix: Tagalog
+    /(?:balewalain|kalimutan|huwag pansinin)\s+(?:ang\s+)?(?:lahat\s+ng\s+)?(?:mga\s+)?(?:naunang|nakaraang)\s+(?:mga\s+)?(?:tagubilin|patakaran)/i,
   ];
 
   const findings = [];
@@ -342,10 +466,17 @@ function detectHtmlComments(text) {
 
 function detectCssHidden(text) {
   const hidePats = PATTERNS.hidden.css_hiding || [];
+  // Wave3-Fix G-15: Add color:transparent and clip-path to hiding patterns
+  const extendedPats = [
+    ...hidePats,
+    'color\\s*:\\s*transparent',
+    'clip-path\\s*:\\s*(?:inset|circle)\\s*\\(.*100%',
+    'text-indent\\s*:\\s*-\\d{4,}',
+  ];
   const injSources = Object.values(PATTERNS.injection).flat();
   let count = 0;
 
-  for (const hSrc of hidePats) {
+  for (const hSrc of extendedPats) {
     const styleRx = makeRx(`style\\s*=\\s*["'][^"']*${hSrc}[^"']*["'][^>]*>[^<]*`);
     if (!styleRx) continue;
     const matches = text.match(styleRx) || [];
@@ -363,6 +494,34 @@ function detectCssHidden(text) {
   }];
 }
 
+// Wave3-Fix M-01/M-02: Detect @font-face glyph remapping and CSS var() reconstruction
+function detectCssRenderingTricks(text) {
+  const findings = [];
+
+  // @font-face with external font source — glyph remapping attack (Xiong et al. 2025)
+  if (/@font-face\s*\{[^}]*src\s*:\s*url\s*\([^)]*https?:\/\//i.test(text)) {
+    findings.push({
+      detector: 'css_fontface_remap',
+      matches: ['@font-face with external font — possible glyph remapping attack'],
+      count: 1,
+      severity: 7,
+    });
+  }
+
+  // CSS var() in content property — value reconstruction attack
+  const varContentMatch = text.match(/content\s*:\s*[^;]*var\s*\(\s*--[^)]+\)[^;]*var\s*\(\s*--/gi);
+  if (varContentMatch) {
+    findings.push({
+      detector: 'css_var_reconstruction',
+      matches: ['CSS var() concatenation in content property — possible payload reconstruction'],
+      count: varContentMatch.length,
+      severity: 6,
+    });
+  }
+
+  return findings;
+}
+
 function detectInvisibleUnicode(originalText) {
   // Run on ORIGINAL text before preprocessing stripped them
   const zwc = (originalText.match(/[\u200B\u200C\u200D\u2060\u200E\u200F\u00AD\uFEFF]/g) || []).length;
@@ -376,6 +535,77 @@ function detectInvisibleUnicode(originalText) {
     count: total,
     severity: Math.min(8, 3 + total), // Lower threshold: even 1 is suspicious
   }];
+}
+
+// Wave3-Fix G-25: Detect security-relevant concepts in memory writes
+// These patterns are individually benign but create risk when stored as persistent context.
+// Each fragment of a compositional memory poisoning attack contains one of these concepts.
+function detectMemorySecurityConcepts(text) {
+  const concepts = [
+    // Credential file references stored as "project facts"
+    { rx: /(?:~\/|home\/|\$HOME\/)?\.(?:aws|ssh|env|gnupg|config\/gcloud|azure)(?:\/|\s|$)/i, name: 'credential_path_reference', sev: 5 },
+    // Safety bypass stored as "user preference"
+    { rx: /(?:--no-verify|--force|--skip-checks?|--disable-safety|--no-auth)\s+(?:flag|option|parameter)?/i, name: 'safety_bypass_preference', sev: 6 },
+    // Delegation of safety to non-existent systems
+    { rx: /(?:safety|security|verification)\s+(?:checks?|validation)\s+(?:are|is)\s+(?:handled|managed|done)\s+(?:by|via|through)\s+(?:the\s+)?(?:CI|pipeline|server|backend|upstream)/i, name: 'safety_delegation', sev: 6 },
+    // Auto-approve instructions stored as team decisions
+    { rx: /(?:auto[.-]?approve|always\s+(?:approve|accept|allow|skip))\s+(?:all\s+)?(?:tool\s+calls?|requests?|commands?|operations?)/i, name: 'auto_approve_instruction', sev: 7 },
+    // Sending/transmitting data to external endpoints
+    { rx: /(?:send(?:ing)?|transmit(?:ting)?|relay(?:ing)?|forward(?:ing)?)\s+(?:connection\s+)?(?:test\s+)?(?:requests?|data|contents?|values?)\s+(?:to\s+)?(?:external|verification|collection)\s+endpoints?/i, name: 'exfil_procedure', sev: 5 },
+    // Wave3-Round4 G-25c: "Testing requires sending requests to external endpoints"
+    { rx: /(?:testing|debugging|diagnostics?)\s+(?:requires?|involves?|needs?)\s+(?:send(?:ing)?|transmit(?:ting)?|making)\s+(?:connection\s+)?(?:test\s+)?requests?\s+(?:to\s+)?(?:external|remote|outside|third[- ]party)\s+(?:\w+\s+)?(?:endpoints?|servers?|services?)/i, name: 'external_request_normalization', sev: 5 },
+    // Reading config as "standard procedure"
+    { rx: /(?:standard|normal|default)\s+(?:debugging|diagnostic|troubleshooting)?\s*(?:procedure|protocol|practice)\s*:\s*(?:read|examine|check|inspect|access)\s+(?:config|credential|secret|\.env|connection)/i, name: 'normalized_credential_access', sev: 6 },
+  ];
+
+  const findings = [];
+  for (const { rx, name, sev } of concepts) {
+    const match = text.match(rx);
+    if (match) {
+      findings.push({
+        detector: `memory_security_concept:${name}`,
+        matches: [match[0].slice(0, 100)],
+        count: 1,
+        severity: sev,
+      });
+    }
+  }
+  return findings;
+}
+
+// Wave3-Fix G-21: Detect command-line exfiltration patterns
+// These catch DNS exfil, git-based exfil, and other Bash-level data leaks
+// that the shield previously had zero coverage for.
+function detectCommandExfil(text) {
+  const patterns = [
+    // DNS exfiltration: dig/nslookup with data in subdomain
+    { rx: /(?:dig|nslookup|host)\s+[^\n]*\$\(.*(?:base64|cat|echo|env|whoami|hostname)/i, name: 'dns_exfiltration', sev: 9 },
+    // Git remote add to attacker endpoint + push
+    { rx: /git\s+remote\s+add\s+\w+\s+https?:\/\/(?!github\.com|gitlab\.com|bitbucket\.org)/i, name: 'git_exfiltration', sev: 8 },
+    { rx: /git\s+push\s+\w+\s+--all/i, name: 'git_push_all', sev: 7 },
+    // curl/wget with data from env/config in URL or body
+    { rx: /(?:curl|wget)\s+[^\n]*\$\(.*(?:cat|base64|env)\s+[^\n]*(?:\.env|credentials|secrets?|tokens?)/i, name: 'curl_data_exfil', sev: 9 },
+    // nc/netcat sending data
+    { rx: /\|\s*(?:nc|netcat|ncat)\s+\S+\s+\d+/i, name: 'netcat_exfil', sev: 9 },
+    // Command substitution exfil in URL parameter
+    { rx: /https?:\/\/[^\s]+\$\((?:cat|base64|echo|env|printenv)\b/i, name: 'url_cmd_substitution_exfil', sev: 9 },
+    // Environment variable dump to network
+    { rx: /(?:printenv|env|set)\s*\|.*(?:curl|wget|nc|netcat|base64)/i, name: 'env_dump_exfil', sev: 9 },
+  ];
+
+  const findings = [];
+  for (const { rx, name, sev } of patterns) {
+    const match = text.match(rx);
+    if (match) {
+      findings.push({
+        detector: `command_exfil:${name}`,
+        matches: [match[0].slice(0, 100)],
+        count: 1,
+        severity: sev,
+      });
+    }
+  }
+  return findings;
 }
 
 // ── Main Scan Function ──────────────────────────────────────────────
@@ -398,6 +628,7 @@ function scanContent(text, opts = {}) {
   if (['web_fetch', 'email', 'general', 'file_read'].includes(context)) {
     findings.push(...detectHtmlComments(text));
     findings.push(...detectCssHidden(text));
+    findings.push(...detectCssRenderingTricks(originalText)); // Wave3-Fix M-01/M-02
     findings.push(...detect(text, PATTERNS.dangerousHtml, 'dangerous_html'));
     findings.push(...detect(text, PATTERNS.markdown, 'markdown_injection'));
     findings.push(...detect(text, PATTERNS.cloaking, 'cloaking'));
@@ -414,10 +645,20 @@ function scanContent(text, opts = {}) {
   // Memory poisoning patterns
   if (context === 'memory_write') {
     findings.push(...detect(text, PATTERNS.memoryPoisoning, 'memory_poisoning'));
+    // Wave3-Fix G-25: Detect security-relevant concepts in memory writes
+    // Individual fragments may be benign, but these concepts are high-risk in memory
+    findings.push(...detectMemorySecurityConcepts(text));
   }
+
+  // Wave3-Fix G-21: Detect command-line exfiltration patterns in all contexts
+  findings.push(...detectCommandExfil(text));
 
   // BYPASS-10: Semantic heuristics (all contexts)
   findings.push(...detectSemanticInjection(text));
+
+  // Wave3-Fix G-13: Run multilingual detection on ORIGINAL text too (before preprocessing
+  // strips diacriticals/combining marks from Turkish, Hindi, Thai, Vietnamese)
+  findings.push(...detectMultilingualInjection(originalText));
 
   // Decode all encodings and rescan decoded content
   const allDecoded = [
@@ -484,21 +725,22 @@ function scanContent(text, opts = {}) {
 // ── URL Validation ──────────────────────────────────────────────────
 
 function validateUrl(url, config = {}) {
-  // Wave2-Oxide: Apply full Unicode normalization to URLs before validation
-  // Strip format chars, null bytes, normalize NFKC, map confusables
-  let lower = url.replace(/\p{Cf}/gu, '');
-  lower = lower.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-  lower = lower.normalize('NFKC');
+  // Wave3-Fix O-07: Apply FULL preprocessing including confusable mapping
+  // Previous code skipped confusable mapping, allowing Cyrillic о in "lоcalhost" to bypass SSRF
+  let lower = preprocess(url);  // Now uses the same preprocessing as content scanning
   lower = lower.toLowerCase();
+  // Wave3-Fix O-08: Also check reversed form to catch RTL-obfuscated domains
+  const reversed = lower.split('').reverse().join('');
 
   if (lower.startsWith('data:')) {
     return { allowed: false, reason: 'Blocked data: URI — potential encoded payload' };
   }
 
-  // Blocked domains
+  // Blocked domains — Wave3-Fix O-08: also check reversed spelling
   const blocked = config.blocked_domains || PATTERNS.blocked_domains || [];
   for (const d of blocked) {
-    if (lower.includes(d)) {
+    const dReversed = d.split('').reverse().join('');
+    if (lower.includes(d) || lower.includes(dReversed) || reversed.includes(d)) {
       return { allowed: false, reason: `Blocked known exfiltration endpoint: ${d}` };
     }
   }
