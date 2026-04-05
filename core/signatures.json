@@ -31,9 +31,10 @@
       "(?i)you\\s+(must|should|shall|will)\\s+(now|always|never|from\\s+now)\\s+(act|behave|respond|ignore|disregard|follow|obey|execute|comply)"
     ],
     "data_exfiltration": [
-      "(?i)(send|post|transmit|exfiltrate|upload)\\s+(to|data\\s+to)\\s+(http|https|ftp|ws)",
-      "(?i)(call|invoke|use|run)\\s+(the\\s+)?(tool|function|command|bash|execute)\\b.*\\b(to|and)\\s+(delete|remove|send|exfiltrate|post)",
-      "(?:https?:\\/\\/[^\\s]+\\?(?:[^\\s]*(?:key|token|secret|data|content)=))"
+      "(?i)(send|post|transmit|exfiltrate|upload|forward|relay)\\s+(to|data\\s+to|it\\s+to|this\\s+to|the\\s+.{1,30}\\s+to)\\s+(http|https|ftp|ws|an?\\s+(?:endpoint|url|server|address))",
+      "(?i)(call|invoke|use|run)\\s+(the\\s+)?(tool|function|command|bash|execute)\\b.*\\b(to|and)\\s+(delete|remove|send|exfiltrate|post|forward|upload)",
+      "(?:https?:\\/\\/[^\\s]+\\?(?:[^\\s]*(?:key|token|secret|data|content|payload|info|dump|leak|body|msg|text|query|param|value|output|response|result|config|env|cred)=))",
+      "(?i)(compose|construct|build|make|create|send|issue)\\s+(?:a\\s+)?(?:web|http|api|network)?\\s*(?:request|call|query|post)\\s+(?:to|at|for)\\s+(?:the\\s+)?(?:following\\s+)?(?:endpoint|url|address|server)"
     ],
     "credential_harvesting": [
       "(?i)(api[_-]?key|secret|token|password|credential)\\s*[=:]",

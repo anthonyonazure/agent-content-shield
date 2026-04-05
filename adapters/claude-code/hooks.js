@@ -15,6 +15,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const yaml = require ? undefined : undefined; // yaml optional
 
+const crypto = require('crypto');
 const core = require('../../core/detectors');
 
 // Load config
@@ -83,8 +84,10 @@ function postContentScanner() {
   else if (tool_name?.includes('Gmail') || tool_name?.includes('email')) context = 'email';
   else if (tool_name?.includes('search') || tool_name?.includes('query')) context = 'knowledge_query';
 
-  const text = extractText(tool_output);
-  if (!text || text.length < 20) return respond({ decision: 'allow' });
+  // BYPASS-17: Deep recursive extraction from nested objects
+  const text = core.deepExtractText(tool_output);
+  // BYPASS-18: Lowered min scan length from 20 to 5
+  if (!text || text.length < core.MIN_SCAN_LENGTH) return respond({ decision: 'allow' });
 
   const result = core.scanContent(text, { context });
   if (result.clean) return respond({ decision: 'allow' });
@@ -196,8 +199,9 @@ function extractMetadata(toolInput) {
 
 function validateViaPython(content, source, metadata) {
   const os = require('os');
-  const tmpInput = path.join(os.tmpdir(), `shield-${process.pid}.json`);
-  const tmpScript = path.join(os.tmpdir(), `shield-${process.pid}.py`);
+  const rand = crypto.randomBytes(8).toString('hex');
+  const tmpInput = path.join(os.tmpdir(), `shield-${rand}.json`);
+  const tmpScript = path.join(os.tmpdir(), `shield-${rand}.py`);
   const coreDir = path.join(__dirname, '..', '..', 'core').replace(/\\/g, '/');
 
   try {
@@ -217,7 +221,7 @@ print(json.dumps({"passed": r.passed, "risk_score": r.risk_score, "flags": r.fla
     });
     return JSON.parse(output.trim());
   } catch {
-    return { passed: true, risk_score: 0, flags: ['validation_error'] };
+    return { passed: false, risk_score: 1.0, flags: ['validation_error_failsafe'] };
   } finally {
     try { fs.unlinkSync(tmpInput); } catch {}
     try { fs.unlinkSync(tmpScript); } catch {}
