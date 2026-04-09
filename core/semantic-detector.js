@@ -25,15 +25,16 @@ const EMBED_MODEL = process.env.SHIELD_EMBED_MODEL || 'nomic-embed-text';
 const CLASSIFIER_MODEL = process.env.SHIELD_CLASSIFIER_MODEL || 'deepseek-r1:8b';
 
 // NLI Intent Classifier — DISABLED
-// Steel-man analysis: the NLI layer costs ~$0.001/scan with ~1s latency,
-// but the attacks it catches (metaphorical intent) still need to fool Claude's
-// own training to succeed. The real security boundary is Claude's alignment,
-// not an external scanner. Regex + embeddings handle known patterns cheaply.
-// Re-enable by uncommenting below if needed.
-const nliModule = null;
-// try {
-//   nliModule = require('./nli-classifier');
-// } catch (e) {}
+// Wave6-Fix: Re-enable NLI layer. Two agents (Ghost, Neuron) identified this as
+// the biggest defensive gap — NLI is the ONLY vocabulary-independent detector.
+// Without it, synonym chains and metaphorical framing bypass everything.
+// Loads lazily; gracefully degrades if Anthropic SDK or Ollama unavailable.
+let nliModule = null;
+try {
+  nliModule = require('./nli-classifier');
+} catch (e) {
+  // NLI layer unavailable — embedding + regex only
+}
 
 
 // Timeouts — semantic layer must not block the agent for too long

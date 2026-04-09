@@ -25,16 +25,19 @@ const crypto = require('crypto');
 const SIGS_PATH = path.join(__dirname, 'signatures.json');
 const SIGS_RAW = fs.readFileSync(SIGS_PATH, 'utf-8');
 const SIGS = JSON.parse(SIGS_RAW);
+
+// Wave6-Fix: Hardcoded known-good hash instead of self-referential check.
+// Previous implementation compared the file against its own load-time hash,
+// which verified nothing if the file was tampered before process start.
+// Update this constant when signatures.json is legitimately modified.
+const SIGS_KNOWN_HASH = 'f6904c482a48197ae65aefc257d154f8fd920ea1c54ee2340782c4de3eb18cb7';
 const SIGS_HASH = crypto.createHash('sha256').update(SIGS_RAW).digest('hex');
 
-/**
- * Verify signatures.json hasn't been tampered with.
- * Call at startup or periodically.
- */
 function verifySigsIntegrity() {
   const current = fs.readFileSync(SIGS_PATH, 'utf-8');
   const hash = crypto.createHash('sha256').update(current).digest('hex');
-  return hash === SIGS_HASH;
+  // Check against both known-good hash (tamper detection) and load-time hash (runtime modification)
+  return hash === SIGS_KNOWN_HASH && hash === SIGS_HASH;
 }
 
 // Compile regex patterns — returns SOURCE strings, compiled fresh each scan
@@ -155,17 +158,25 @@ function preprocess(text) {
 
 // ── Deep text extraction (BYPASS-17) ────────────────────────────────
 
-function deepExtractText(obj, depth = 0) {
-  // Wave2-Oxide: Increased depth from 10 to 20, use getOwnPropertyNames for non-enumerable
-  if (depth > 20) return '';
+function deepExtractText(obj, depth = 0, seen = null) {
+  // Wave6-Fix: Added cycle protection (WeakSet) and width limit to prevent
+  // stack overflow from circular references and DoS from high-branching objects.
+  // Also excludes __proto__/constructor/prototype to prevent prototype pollution gadgets.
+  if (depth > 15) return '';
   if (!obj) return '';
   if (typeof obj === 'string') return obj;
-  if (Array.isArray(obj)) return obj.map(x => deepExtractText(x, depth + 1)).join('\n');
+  if (!seen) seen = new WeakSet();
+  const MAX_WIDTH = 50;
   if (typeof obj === 'object') {
-    // Use getOwnPropertyNames to catch non-enumerable properties too
-    const keys = Object.getOwnPropertyNames(obj);
+    if (seen.has(obj)) return '';
+    seen.add(obj);
+  }
+  if (Array.isArray(obj)) return obj.slice(0, MAX_WIDTH).map(x => deepExtractText(x, depth + 1, seen)).join('\n');
+  if (typeof obj === 'object') {
+    const keys = Object.keys(obj).slice(0, MAX_WIDTH);
     return keys.map(k => {
-      try { return deepExtractText(obj[k], depth + 1); }
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') return '';
+      try { return deepExtractText(obj[k], depth + 1, seen); }
       catch { return ''; }
     }).join('\n');
   }

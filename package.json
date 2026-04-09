@@ -1,6 +1,6 @@
 {
   "name": "agent-content-shield",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Defense framework against AI agent content injection, memory poisoning, and RAG attacks. Platform-agnostic with adapters for Claude Code, MCP middleware, and CLI.",
   "main": "core/detectors.js",
   "bin": {
@@ -8,6 +8,9 @@
   },
   "scripts": {
     "test": "node test/run.js",
+    "test:semantic": "node test/run.js --semantic",
+    "test:all": "node test/run.js --all",
+    "test:detectors": "node --test test/detectors.test.js",
     "scan": "node cli/shield.js scan-dir",
     "lint": "echo 'no lint configured'"
   },
@@ -26,7 +29,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AnthonyClendenen/agent-content-shield"
+    "url": "https://github.com/anthonyonazure/agent-content-shield"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -38,6 +41,9 @@
     "config/"
   ],
   "dependencies": {
+    "js-yaml": "^4.1.1"
+  },
+  "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.82.0"
   }
 }

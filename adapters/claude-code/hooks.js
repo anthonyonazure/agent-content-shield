@@ -13,8 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const yaml = require ? undefined : undefined; // yaml optional
-
+const yaml = require('js-yaml');
 const crypto = require('crypto');
 const core = require('../../core/detectors');
 
@@ -26,80 +25,21 @@ try {
   // Semantic layer not available — regex-only mode
 }
 
-// Wave3-Fix G-30: Proper YAML config parsing
-// Previous parser only read flat numeric values, silently discarding ALL nested config
-// (trusted_domains, blocked_domains, tool_mappings, scan_contexts) — making the config file
-// a false sense of configurability. Now parses nested structures properly.
+// Wave6-Fix: Replace broken hand-rolled YAML parser with js-yaml.
+// The previous parser only handled flat values and one-level nesting, silently
+// discarding tool_mappings, scan_contexts, nested arrays — making config decorative.
 let CONFIG = {};
 try {
   const cfgPath = path.join(__dirname, '..', '..', 'config', 'default.yaml');
-  const cfgText = fs.readFileSync(cfgPath, 'utf-8');
-
-  // Lightweight YAML parser that handles flat values, arrays, and one-level nesting
-  let currentKey = null;
-  let currentIndent = 0;
-
-  for (const line of cfgText.split('\n')) {
-    // Skip comments and empty lines
-    if (!line.trim() || line.trim().startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-
-    // Array item (starts with "- ")
-    const arrayMatch = line.match(/^\s+-\s+(.+)$/);
-    if (arrayMatch && currentKey) {
-      if (!Array.isArray(CONFIG[currentKey])) CONFIG[currentKey] = [];
-      let val = arrayMatch[1].trim();
-      // Strip quotes
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
-        val = val.slice(1, -1);
-      CONFIG[currentKey].push(val);
-      continue;
-    }
-
-    // Key: value pair
-    const kvMatch = line.match(/^(\w[\w.]*?):\s+(.+)$/);
-    if (kvMatch && indent === 0) {
-      currentKey = kvMatch[1];
-      let val = kvMatch[2].trim();
-      // Strip inline comments
-      val = val.replace(/\s+#.*$/, '');
-      // Strip quotes
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
-        val = val.slice(1, -1);
-      // Parse numbers and booleans
-      if (/^\d+(\.\d+)?$/.test(val)) CONFIG[currentKey] = parseFloat(val);
-      else if (val === 'true') CONFIG[currentKey] = true;
-      else if (val === 'false') CONFIG[currentKey] = false;
-      else CONFIG[currentKey] = val;
-      continue;
-    }
-
-    // Section header (key with no value, just colon)
-    const sectionMatch = line.match(/^(\w[\w.]*?):\s*$/);
-    if (sectionMatch && indent === 0) {
-      currentKey = sectionMatch[1];
-      CONFIG[currentKey] = {};
-      continue;
-    }
-
-    // Nested key under section
-    const nestedMatch = line.match(/^\s+(\w[\w.]*?):\s+(.+)$/);
-    if (nestedMatch && currentKey && typeof CONFIG[currentKey] === 'object' && !Array.isArray(CONFIG[currentKey])) {
-      let val = nestedMatch[2].trim().replace(/\s+#.*$/, '');
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
-        val = val.slice(1, -1);
-      if (/^\d+(\.\d+)?$/.test(val)) CONFIG[currentKey][nestedMatch[1]] = parseFloat(val);
-      else if (val === 'true') CONFIG[currentKey][nestedMatch[1]] = true;
-      else if (val === 'false') CONFIG[currentKey][nestedMatch[1]] = false;
-      else CONFIG[currentKey][nestedMatch[1]] = val;
-      continue;
-    }
-  }
-} catch {}
+  CONFIG = yaml.load(fs.readFileSync(cfgPath, 'utf-8')) || {};
+} catch (e) {
+  process.stderr.write(`shield: config load error: ${e.message}\n`);
+}
 
 const SANITIZE_THRESHOLD = CONFIG.sanitize_threshold || 8;
 const LOG_DIR = path.join(__dirname, '..', '..', 'logs');
+
+const MAX_LOG_SIZE = CONFIG.log?.max_size || CONFIG.max_size || 10485760; // 10MB default
 
 function ensureLogDir() {
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
@@ -107,18 +47,34 @@ function ensureLogDir() {
 
 function logDetection(data) {
   ensureLogDir();
+  const logFile = path.join(LOG_DIR, 'detections.jsonl');
   try {
+    // Wave6-Fix: Implement log rotation (was configured in YAML but never enforced)
+    try {
+      const stats = fs.statSync(logFile);
+      if (stats.size >= MAX_LOG_SIZE) {
+        const rotated = path.join(LOG_DIR, `detections-${Date.now()}.jsonl`);
+        fs.renameSync(logFile, rotated);
+        // Keep only last 5 rotated files
+        const files = fs.readdirSync(LOG_DIR)
+          .filter(f => f.startsWith('detections-') && f.endsWith('.jsonl'))
+          .sort()
+          .reverse();
+        for (const old of files.slice(5)) {
+          fs.unlinkSync(path.join(LOG_DIR, old));
+        }
+      }
+    } catch {} // File doesn't exist yet — fine
     // Wave3-Fix O-05: Sanitize string values to prevent JSONL log injection
-    // JSON.stringify handles newlines in string values, but ensure no raw newlines
-    // in the data object keys that might bypass serialization
     const sanitized = JSON.parse(JSON.stringify(data, (key, val) =>
       typeof val === 'string' ? val.replace(/[\n\r]/g, '\\n') : val
     ));
-    fs.appendFileSync(
-      path.join(LOG_DIR, 'detections.jsonl'),
+    fs.appendFileSync(logFile,
       JSON.stringify({ ts: new Date().toISOString(), ...sanitized }) + '\n'
     );
-  } catch {}
+  } catch (e) {
+    process.stderr.write(`shield: log error: ${e.message}\n`);
+  }
 }
 
 // ── Hook: Pre-Fetch Guard ───────────────────────────────────────────
@@ -149,15 +105,26 @@ async function postContentScanner() {
   const input = JSON.parse(fs.readFileSync(0, 'utf-8'));
   const { tool_name, tool_input, tool_output } = input;
 
-  // Wave4-Fix: Expanded context classification to cover MCP tools, git, package files
-  // Previously only 3 contexts triggered semantic scan — MCP tools got regex-only
+  // Wave6-Fix: Config-driven tool classification via tool_mappings
+  // Falls back to hardcoded checks if config doesn't have tool_mappings
   let context = 'general';
-  if (tool_name === 'WebFetch') context = 'web_fetch';
+  const toolMappings = CONFIG.tool_mappings || {};
+  const matchesMapping = (category) => {
+    const patterns = toolMappings[category] || [];
+    return patterns.some(p => {
+      try { return new RegExp(p, 'i').test(tool_name); } catch { return false; }
+    });
+  };
+
+  if (matchesMapping('content_fetch')) context = 'web_fetch';
   else if (tool_name === 'Read' && tool_input?.file_path?.toLowerCase().endsWith('.pdf')) context = 'pdf_read';
-  else if (tool_name?.includes('Gmail') || tool_name?.includes('email') || tool_name?.includes('Calendar')) context = 'email';
-  else if (tool_name?.includes('search') || tool_name?.includes('query') || tool_name?.includes('knowledge') || tool_name?.includes('ctx_search')) context = 'knowledge_query';
-  else if (tool_name?.includes('mcp__')) context = 'mcp_external';  // All MCP tools = external content
-  else if (tool_name === 'Bash') context = 'bash_output';  // Git log, curl output, etc.
+  else if (matchesMapping('external_content')) context = 'email';
+  else if (matchesMapping('knowledge_query')) context = 'knowledge_query';
+  else if (tool_name?.includes('mcp__')) context = 'mcp_external';
+  else if (matchesMapping('code_execution')) context = 'bash_output';
+  // Fallbacks if no tool_mappings in config
+  else if (tool_name === 'WebFetch') context = 'web_fetch';
+  else if (tool_name === 'Bash') context = 'bash_output';
 
   // Wave5-Fix W5-01: Image/multimodal content warning
   // When Read returns image content, the text scanner has nothing to scan.
@@ -216,9 +183,9 @@ async function postContentScanner() {
   }
 
   // ── Layer 2+3: Semantic scan ──
-  // Wave5-Fix W5-03: Run semantic on ALL contexts including pdf_read
-  // PDF was the only context that got regex-only — now gets full 4-layer analysis
-  const semanticContexts = ['web_fetch', 'email', 'knowledge_query', 'mcp_external', 'bash_output', 'general', 'pdf_read'];
+  // Wave6-Fix: Use config-driven scan contexts instead of hardcoded list
+  const defaultContexts = ['web_fetch', 'email', 'knowledge_query', 'mcp_external', 'bash_output', 'general', 'pdf_read'];
+  const semanticContexts = CONFIG.semantic?.scan_contexts || defaultContexts;
   if (semantic && semanticContexts.includes(context) && text.length >= 50) {
     try {
       const semResult = await semantic.semanticScan(text);

@@ -67,6 +67,30 @@ const THREAT_INTENTS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════
+// Wave6-Fix: Shared JSON extraction with intent validation.
+// Both Claude and Ollama paths now use this to prevent attacker-embedded
+// JSON with fake "benign: true" from being accepted.
+const VALID_INTENT_IDS = new Set(THREAT_INTENTS.map(t => t.id));
+
+function extractAndValidateJson(content) {
+  const jsonObjects = [];
+  const jsonRx = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
+  let jm;
+  while ((jm = jsonRx.exec(content)) !== null) {
+    try { jsonObjects.push(JSON.parse(jm[0])); } catch {}
+  }
+  // Take the last valid JSON object (model's response, not echoed input)
+  const parsed = jsonObjects[jsonObjects.length - 1];
+  if (!parsed) return null;
+  // Validate that matched intents use known IDs — attacker can't invent fake "benign" intents
+  const validMatches = (parsed.matches || []).filter(m => VALID_INTENT_IDS.has(m.intent));
+  return {
+    matches: validMatches,
+    benign: validMatches.length === 0 ? (parsed.benign ?? true) : false,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // NLI CLASSIFICATION VIA CLAUDE API
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -145,24 +169,11 @@ async function classifyWithClaude(text, model = 'claude-haiku-4-5-20251001') {
 
     const content = response.content[0]?.text || '';
 
-    // Wave4-Fix: Non-greedy JSON parsing — match the LAST complete JSON object
-    // Previously used greedy regex that could match attacker-embedded JSON in the input
-    // Now finds all JSON objects and takes the last one (model's actual response)
-    const jsonObjects = [];
-    const jsonRx = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
-    let jm;
-    while ((jm = jsonRx.exec(content)) !== null) {
-      try { jsonObjects.push(JSON.parse(jm[0])); } catch {}
-    }
-    // Take the last valid JSON object (model's response, not echoed input)
-    const parsed = jsonObjects[jsonObjects.length - 1];
+    // Wave6-Fix: Validate parsed intents against known set to prevent
+    // attacker-embedded JSON with fake "benign: true" from being accepted.
+    const parsed = extractAndValidateJson(content);
     if (!parsed) return null;
-    return {
-      matches: parsed.matches || [],
-      benign: parsed.benign ?? true,
-      model,
-      raw: content.slice(0, 300),
-    };
+    return { ...parsed, model, raw: content.slice(0, 300) };
   } catch (e) {
     // API error — return null to signal fallback
     return null;
@@ -203,16 +214,10 @@ ${text.slice(0, 2000)}`;
     const data = await res.json();
     const content = (data.response || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      matches: parsed.matches || [],
-      benign: parsed.benign ?? true,
-      model: 'deepseek-r1:8b',
-      raw: content.slice(0, 300),
-    };
+    // Wave6-Fix: Use same validated JSON extraction as Claude path
+    const parsed = extractAndValidateJson(content);
+    if (!parsed) return null;
+    return { ...parsed, model: 'deepseek-r1:8b', raw: content.slice(0, 300) };
   } catch {
     return null;
   }
