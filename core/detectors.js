@@ -229,6 +229,42 @@ function detectAndDecodeUrlEncoding(text) {
   return decoded;
 }
 
+// Wave6-Fix: UTF-7 decoding (email content can use +AGkAZwBuAG8AcgBlAA- = "ignore")
+function detectAndDecodeUtf7(text) {
+  const utf7Rx = /\+([A-Za-z0-9+/]{4,})-/g;
+  const decoded = [];
+  let m;
+  while ((m = utf7Rx.exec(text)) !== null) {
+    try {
+      // UTF-7 uses modified base64 for non-ASCII
+      const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = Buffer.from(b64, 'base64');
+      // UTF-7 encodes UTF-16BE
+      const chars = [];
+      for (let i = 0; i < bytes.length - 1; i += 2) {
+        chars.push(String.fromCharCode((bytes[i] << 8) | bytes[i + 1]));
+      }
+      const d = chars.join('');
+      if (d.length >= 4 && /[a-zA-Z]/.test(d)) decoded.push(d);
+    } catch {}
+  }
+  return decoded;
+}
+
+// Wave6-Fix: Quoted-Printable decoding (=69=67=6E=6F=72=65 = "ignore")
+function detectAndDecodeQuotedPrintable(text) {
+  const qpRx = /((?:=[0-9A-Fa-f]{2}){4,})/g;
+  const decoded = [];
+  let m;
+  while ((m = qpRx.exec(text)) !== null) {
+    try {
+      const d = m[1].replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+      if (d.length >= 4 && /[a-zA-Z]/.test(d)) decoded.push(d);
+    } catch {}
+  }
+  return decoded;
+}
+
 // ── Semantic heuristics (BYPASS-10) ─────────────────────────────────
 
 function detectSemanticInjection(text) {
@@ -910,6 +946,8 @@ function scanContent(text, opts = {}) {
     ...detectAndDecodeBase64(text),
     ...detectAndDecodeHex(text),
     ...detectAndDecodeUrlEncoding(text),
+    ...detectAndDecodeUtf7(text),
+    ...detectAndDecodeQuotedPrintable(text),
   ];
   // Wave2-Ghost: ROT13 decode — decode the alphabetic portions and rescan
   const rot13Text = text.replace(/[a-zA-Z]/g, c => {

@@ -99,6 +99,60 @@ function preFetchGuard() {
   respond({ decision: 'allow' });
 }
 
+// ── Hook: Pre-Write Guard ──────────────────────────────────────────
+// Wave6: Scan Write/Edit operations targeting sensitive config files.
+
+function preWriteGuard() {
+  const input = JSON.parse(fs.readFileSync(0, 'utf-8'));
+  const { tool_name, tool_input } = input;
+
+  if (tool_name !== 'Write' && tool_name !== 'Edit') return respond({ decision: 'allow' });
+
+  const filePath = (tool_input?.file_path || '').toLowerCase().replace(/\\/g, '/');
+  const content = tool_input?.content || tool_input?.new_string || '';
+
+  // Block writes to security-critical files
+  const protectedPaths = [
+    /\.claude\/settings\.json$/,
+    /\.claude\/hooks\//,
+    /\.mcp\.json$/,
+    /agent-content-shield\/core\/signatures\.json$/,
+    /agent-content-shield\/config\/default\.yaml$/,
+    /\.env$/,
+    /\.ssh\//,
+    /\.gnupg\//,
+    /\.aws\/credentials$/,
+  ];
+
+  for (const rx of protectedPaths) {
+    if (rx.test(filePath)) {
+      // Scan the content being written for injection
+      const result = core.scanContent(content, { context: 'config_write' });
+      if (!result.clean && result.maxSeverity >= 6) {
+        logDetection({
+          hook: 'pre-write',
+          tool: tool_name,
+          file: filePath,
+          maxSev: result.maxSeverity,
+          detections: result.totalDetections,
+        });
+        return respond({
+          decision: 'block',
+          reason: [
+            'Content Shield: Write to protected file BLOCKED',
+            `  File: ${filePath}`,
+            `  Severity: ${result.maxSeverity}/10`,
+            `  Detections: ${result.findings.map(f => f.detector).join(', ')}`,
+            '  This file is security-critical. Review and retry manually.',
+          ].join('\n'),
+        });
+      }
+    }
+  }
+
+  respond({ decision: 'allow' });
+}
+
 // ── Hook: Pre-Bash Guard ───────────────────────────────────────────
 // Wave6: Bash was completely unmonitored — DNS exfil, curl, git push invisible.
 // This PreToolUse hook scans commands before execution.
@@ -351,7 +405,9 @@ function saveFragment(content, tool) {
     fs.appendFileSync(MEMORY_FRAGMENT_LOG,
       JSON.stringify({ ts: Date.now(), tool, text: content.slice(0, 500) }) + '\n'
     );
-  } catch {}
+  } catch (e) {
+    process.stderr.write(`shield: fragment log error: ${e.message}\n`);
+  }
 }
 
 function checkCompositeInjection(currentContent) {
@@ -521,7 +577,9 @@ r = validate_memory_write(data['content'], data['source'], data.get('metadata', 
 print(json.dumps({"passed": r.passed, "risk_score": r.risk_score, "flags": r.flags}))
 `;
     fs.writeFileSync(tmpScript, pyCode);
-    const output = execSync(`python "${tmpScript}"`, {
+    // Wave6-Fix: Use python3 on Linux/macOS, python on Windows
+    const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
+    const output = execSync(`${pythonBin} "${tmpScript}"`, {
       timeout: 8000, encoding: 'utf-8', windowsHide: true,
     });
     return JSON.parse(output.trim());
@@ -542,6 +600,7 @@ async function main() {
   switch (hookType) {
     case 'pre-fetch':    preFetchGuard(); break;
     case 'pre-bash':     preBashGuard(); break;
+    case 'pre-write':    preWriteGuard(); break;
     case 'post-content': await postContentScanner(); break;
     case 'pre-memory':   preMemoryGuard(); break;
     default:             await postContentScanner(); break;

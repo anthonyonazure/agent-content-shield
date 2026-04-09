@@ -81,6 +81,46 @@ switch (command) {
     process.exit(threats > 0 ? 1 : 0);
   }
 
+  case 'status': {
+    const sigsOk = core.verifySigsIntegrity();
+    const logFile = path.join(__dirname, '..', 'logs', 'detections.jsonl');
+    let logLines = 0, lastDetection = 'never';
+    try {
+      const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n').filter(Boolean);
+      logLines = lines.length;
+      if (lines.length > 0) lastDetection = JSON.parse(lines[lines.length - 1]).ts;
+    } catch {}
+    // Check Ollama
+    let ollamaStatus = 'unknown';
+    try {
+      const { execSync } = require('child_process');
+      execSync('curl -sf http://localhost:11434/api/tags', { timeout: 3000, stdio: 'pipe' });
+      ollamaStatus = 'running';
+    } catch { ollamaStatus = 'down'; }
+
+    const status = {
+      version: require('../package.json').version,
+      signatures_integrity: sigsOk ? 'OK' : 'TAMPERED',
+      ollama: ollamaStatus,
+      total_detections: logLines,
+      last_detection: lastDetection,
+      node_version: process.version,
+      platform: process.platform,
+    };
+    if (jsonOutput) {
+      console.log(JSON.stringify(status));
+    } else {
+      console.log(`Agent Content Shield v${status.version}`);
+      console.log(`  Signatures:     ${sigsOk ? '\x1b[32mOK\x1b[0m' : '\x1b[31mTAMPERED\x1b[0m'}`);
+      console.log(`  Ollama:         ${ollamaStatus === 'running' ? '\x1b[32mrunning\x1b[0m' : '\x1b[33m' + ollamaStatus + '\x1b[0m'}`);
+      console.log(`  Detections:     ${logLines} total`);
+      console.log(`  Last detection: ${lastDetection}`);
+      console.log(`  Node:           ${process.version}`);
+      console.log(`  Platform:       ${process.platform}`);
+    }
+    process.exit(sigsOk ? 0 : 1);
+  }
+
   case 'validate-url': {
     const url = args[1];
     if (!url) { console.error('Usage: shield validate-url <url>'); process.exit(2); }
@@ -101,6 +141,7 @@ Usage:
   shield scan <file>              Scan a file for threats
   shield scan-dir <dir>           Scan all files in a directory
   shield validate-url <url>       Check if a URL is safe to fetch
+  shield status                   Show shield health and detection stats
 
 Options:
   --context <type>    web_fetch|pdf_read|email|memory_write|knowledge_doc|general

@@ -187,8 +187,8 @@ async function classifyWithClaude(text, model = 'claude-haiku-4-5-20251001') {
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
 
 async function classifyWithOllama(text) {
-  const prompt = `/no_think
-${NLI_SYSTEM_PROMPT}
+  // Wave6-Fix: Removed /no_think — let the model reason for security decisions
+  const prompt = `${NLI_SYSTEM_PROMPT}
 
 Classify this text:
 
