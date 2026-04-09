@@ -41,10 +41,34 @@ try {
 const EMBED_TIMEOUT_MS = 2000;
 const CLASSIFY_TIMEOUT_MS = 30000; // Thinking models need more time
 
-// Thresholds — tuned to minimize false positives on benign web content
+// Default thresholds — tuned to minimize false positives on benign web content
 const EMBEDDING_ALERT_THRESHOLD = 0.78;   // cosine sim above this = suspicious
 const EMBEDDING_BLOCK_THRESHOLD = 0.88;   // cosine sim above this = very likely injection
 const CLASSIFIER_THRESHOLD = 0.70;        // LLM confidence above this = injection
+
+// Wave6.2: Per-category thresholds — some attack categories produce tighter
+// embedding clusters (high internal similarity), others are more diffuse.
+// Social engineering seeds are more diverse in vocabulary, so lower thresholds
+// catch more without losing precision.
+const CATEGORY_THRESHOLDS = {
+  'direct_override':       { alert: 0.76, block: 0.86 },  // tight cluster
+  'role_hijacking':        { alert: 0.76, block: 0.86 },
+  'system_boundary':       { alert: 0.80, block: 0.90 },  // very distinctive markers
+  'social_engineering':    { alert: 0.72, block: 0.82 },  // diffuse vocabulary
+  'data_exfiltration':     { alert: 0.76, block: 0.86 },
+  'memory_poisoning':      { alert: 0.74, block: 0.84 },
+  'rlhf_exploitation':     { alert: 0.72, block: 0.82 },
+  'emotional_manipulation': { alert: 0.70, block: 0.80 },
+  'code_embedded':         { alert: 0.74, block: 0.84 },
+  'tool_abuse':            { alert: 0.74, block: 0.84 },
+  'default':               { alert: 0.78, block: 0.88 },
+};
+
+// Wave6.2: Degraded-mode re-scan queue — when Ollama is down, store content
+// that passed regex-only for later re-analysis when Ollama recovers
+const DEGRADED_QUEUE = [];
+const MAX_QUEUE_SIZE = 100;
+const DEGRADED_QUEUE_TTL_MS = 600000; // 10 minutes
 
 // ═══════════════════════════════════════════════════════════════════════
 // INJECTION EMBEDDING BANK
@@ -221,6 +245,42 @@ const INJECTION_SEEDS = [
 
 // Cache for seed embeddings (computed once at first use)
 let seedEmbeddingsCache = null;
+
+// Wave6.2: Build seed-to-category index from the INJECTION_SEEDS array structure
+// Categories are inferred from the comment labels above each group
+function buildSeedCategoryMap() {
+  // Map seed index -> category name for per-category thresholds
+  const map = [];
+  const categoryKeywords = {
+    'direct_override': /direct.*override|instruction.*override/i,
+    'role_hijacking': /role.*hijack/i,
+    'system_boundary': /system.*boundary/i,
+    'social_engineering': /social.*engineer|false.*authority/i,
+    'data_exfiltration': /data.*exfiltrat|exfiltrat/i,
+    'memory_poisoning': /memory.*poison/i,
+    'rlhf_exploitation': /rlhf/i,
+    'emotional_manipulation': /emotional.*manipulat|urgency/i,
+    'code_embedded': /code.*embed/i,
+    'tool_abuse': /tool.*abuse|dangerous.*command/i,
+  };
+  // Simple: assign based on seed content heuristics
+  for (const seed of INJECTION_SEEDS) {
+    const s = seed.toLowerCase();
+    if (/ignore.*previous|disregard|forget.*told|void.*follow/i.test(s)) map.push('direct_override');
+    else if (/you are now|switch to|act as|developer mode|dan/i.test(s)) map.push('role_hijacking');
+    else if (/\[system\]|\[inst\]|<\|system\|>/i.test(s)) map.push('system_boundary');
+    else if (/send.*to.*http|exfiltrat|upload.*data|transmit.*endpoint/i.test(s)) map.push('data_exfiltration');
+    else if (/from now on|remember.*future|always.*respond/i.test(s)) map.push('memory_poisoning');
+    else if (/helpfulness|comply.*receiv|never refuse|rating/i.test(s)) map.push('rlhf_exploitation');
+    else if (/emergency|people will|urgent|no time/i.test(s)) map.push('emotional_manipulation');
+    else if (/\/\/|# todo|\/\*|<!--|config.*override/i.test(s)) map.push('code_embedded');
+    else if (/curl.*bash|write.*settings|chmod|\.env.*file/i.test(s)) map.push('tool_abuse');
+    else if (/security team|authorized|compliance|ciso|admin/i.test(s)) map.push('social_engineering');
+    else map.push('default');
+  }
+  return map;
+}
+const SEED_CATEGORIES = buildSeedCategoryMap();
 let ollamaAvailable = null;
 let ollamaLastCheck = 0;
 const OLLAMA_RECHECK_MS = 30000; // Re-check availability every 30s instead of caching forever
@@ -430,6 +490,7 @@ async function embeddingScan(text) {
   let maxSim = 0;
   let bestChunk = '';
   let bestSeed = '';
+  let bestCategory = 'default';
 
   for (const chunk of scanChunks) {
     const emb = await ollamaEmbed(chunk);
@@ -441,18 +502,26 @@ async function embeddingScan(text) {
         maxSim = sim;
         bestChunk = chunk;
         bestSeed = INJECTION_SEEDS[i];
+        bestCategory = SEED_CATEGORIES[i] || 'default';
       }
     }
   }
 
+  // Wave6.2: Use per-category thresholds instead of global defaults
+  const catThresholds = CATEGORY_THRESHOLDS[bestCategory] || CATEGORY_THRESHOLDS.default;
+  const alertThreshold = catThresholds.alert;
+  const blockThreshold = catThresholds.block;
+
   return {
-    suspicious: maxSim >= EMBEDDING_ALERT_THRESHOLD,
-    blocked: maxSim >= EMBEDDING_BLOCK_THRESHOLD,
+    suspicious: maxSim >= alertThreshold,
+    blocked: maxSim >= blockThreshold,
     score: maxSim,
     bestChunk: bestChunk.slice(0, 200),
     bestSeedMatch: bestSeed.slice(0, 100),
-    reason: maxSim >= EMBEDDING_ALERT_THRESHOLD
-      ? `Embedding similarity ${maxSim.toFixed(3)} to known injection pattern`
+    category: bestCategory,
+    thresholds: catThresholds,
+    reason: maxSim >= alertThreshold
+      ? `Embedding similarity ${maxSim.toFixed(3)} to ${bestCategory} pattern (threshold ${alertThreshold})`
       : 'benign',
   };
 }
@@ -1072,6 +1141,28 @@ function offlineThreatScore(text) {
  *   latencyMs: total time
  * }
  */
+// Wave6.2: Process content queued during Ollama outage
+async function processDegradedQueue() {
+  if (DEGRADED_QUEUE.length === 0) return;
+  const batch = DEGRADED_QUEUE.splice(0, Math.min(10, DEGRADED_QUEUE.length));
+  let flagged = 0;
+  for (const item of batch) {
+    try {
+      const embResult = await embeddingScan(item.text);
+      if (embResult.suspicious) {
+        flagged++;
+        process.stderr.write(
+          `shield: degraded-queue rescan FLAGGED (sim=${embResult.score.toFixed(3)}, ` +
+          `original offline=${item.offlineScore.toFixed(3)})\n`
+        );
+      }
+    } catch {}
+  }
+  if (flagged > 0) {
+    process.stderr.write(`shield: degraded-queue rescan complete: ${flagged}/${batch.length} flagged\n`);
+  }
+}
+
 async function semanticScan(text, opts = {}) {
   const start = Date.now();
   const forceAll = opts.forceAllLayers || false;
@@ -1095,15 +1186,32 @@ async function semanticScan(text, opts = {}) {
     // This provides meaningful detection even without embedding/LLM layers.
     const offline = offlineThreatScore(text);
     details.offlineFallback = offline.details;
+    // Wave6.2: Queue non-injection content for re-scan when Ollama recovers
+    if (!offline.injection && text.length >= 50) {
+      const now = Date.now();
+      // Evict stale entries
+      while (DEGRADED_QUEUE.length > 0 && (now - DEGRADED_QUEUE[0].ts) > DEGRADED_QUEUE_TTL_MS) {
+        DEGRADED_QUEUE.shift();
+      }
+      if (DEGRADED_QUEUE.length < MAX_QUEUE_SIZE) {
+        DEGRADED_QUEUE.push({ text: text.slice(0, 4000), ts: now, offlineScore: offline.confidence });
+      }
+    }
     return {
       injection: offline.injection,
       confidence: offline.confidence,
       layers: offline.layers,
       details,
       ollamaDown: true,
+      queuedForRescan: !offline.injection,
       warning: 'Semantic layer unavailable — using offline TF-IDF/entropy/structural fallback',
       latencyMs: Date.now() - start,
     };
+  }
+
+  // Wave6.2: If Ollama just recovered and there's a backlog, process it async
+  if (DEGRADED_QUEUE.length > 0) {
+    processDegradedQueue().catch(() => {});
   }
 
   // ── Layer 1: Embedding scan (~50ms) ──
