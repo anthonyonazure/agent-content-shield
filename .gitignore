@@ -3,3 +3,4 @@ __pycache__/
 logs/
 .gitnexus
 .env
+node_modules/
