@@ -585,8 +585,10 @@ function detectMultilingualInjection(text) {
     /(?:აჩვენე|გამოავლინე)\s+(?:სისტემის\s+)?(?:პრომფტი|კონფიგურაცია)/,
     /(?:ამიერიდან)\s+(?:ყოველთვის|არასდროს)/,
 
-    // Armenian
-    /(?:անտեսdelays|մdelays)\s+(?:բdelays\s+)?(?:նdelays|նdelays)\s+(?:հdelays|ցdelays)/i,
+    // Armenian — ignore/disregard previous + show system prompt + role hijack
+    /(?:antesel|moranal|ankxel)\s+(?:bolor\s+)?(?:naxord|naxkin)\s+(?:hrahangner|kanonner|cucumner)/i,
+    /(?:cuyc\s+tal|bacahaytel)\s+(?:hamakargi\s+)?(?:prompt|kargavorumner)/i,
+    /(?:aysueshetiv)\s+(?:misht|erbek)/i,
 
     // Kazakh (Cyrillic)
     /(?:елемеу|ұмыту|қалдыру)\s+(?:барлық\s+)?(?:алдыңғы|бұрынғы)\s+(?:нұсқаулар|ережелер|бұйрықтар)/i,
