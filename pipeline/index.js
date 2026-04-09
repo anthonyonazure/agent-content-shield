@@ -25,6 +25,7 @@ const feedback = require('./feedback');
 const health = require('./health-metrics');
 const threatFeeds = require('./threat-feeds');
 const calibrate = require('./calibrate-idf');
+const { FederatedThreatIntel } = require('./threat-intel-federated');
 
 // ═══════════════════════════════════════════════════════════════════════
 // FULL LEARNING CYCLE
@@ -119,7 +120,21 @@ function runLearningCycle(opts = {}) {
     report.stages.health = { error: e.message };
   }
 
-  // Stage 7: Feedback summary
+  // Stage 7: Federated threat intel (contribute local patterns)
+  try {
+    const intel = new FederatedThreatIntel();
+    const localPatterns = intel.store.patterns.slice(-20);
+    const applied = intel.applyPatterns(localPatterns);
+    report.stages.federatedIntel = {
+      localPatterns: intel.store.patterns.length,
+      rulesApplied: applied.applied,
+      shareEnabled: intel.shareEnabled,
+    };
+  } catch (e) {
+    report.stages.federatedIntel = { error: e.message };
+  }
+
+  // Stage 8: Feedback summary
   try {
     const fbSummary = feedback.getFeedbackSummary();
     report.stages.feedback = {
@@ -224,6 +239,7 @@ Sub-pipelines (run directly):
   node pipeline/health-metrics.js [report [hours]|recent [minutes]]
   node pipeline/threat-feeds.js [ingest <file>|list|register <name> <url>]
   node pipeline/calibrate-idf.js [calibrate <benign-dir> [injection.jsonl]]
+  node pipeline/threat-intel-federated.js           — Local federated intel stats
 `);
   }
 }
@@ -239,6 +255,7 @@ module.exports = {
   health,
   threatFeeds,
   calibrate,
+  FederatedThreatIntel,
   // Orchestration
   runLearningCycle,
   getStatus,

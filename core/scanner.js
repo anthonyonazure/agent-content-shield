@@ -22,6 +22,14 @@ try {
   // Semantic layer not available — regex-only mode
 }
 
+// Influence taxonomy classifier (optional — categorizes threats by manipulation type)
+let influenceTaxonomy = null;
+try {
+  influenceTaxonomy = require('./influence-taxonomy');
+} catch (e) {
+  // Influence taxonomy not available
+}
+
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -154,7 +162,7 @@ async function scan(text, opts = {}) {
       ? warning + '\n[CONTENT SANITIZED]\n\n' + core.sanitizeContent(text)
       : warning + '\n' + text;
 
-    return {
+    const regexResult = {
       clean: false,
       findings: result.findings,
       maxSeverity: result.maxSeverity,
@@ -163,6 +171,15 @@ async function scan(text, opts = {}) {
       sanitized,
       output: sanitized,
     };
+
+    // Classify influence type
+    if (influenceTaxonomy) {
+      regexResult.influenceClassifications = influenceTaxonomy.classifyInfluence(
+        result, { context, toolName, text }
+      );
+    }
+
+    return regexResult;
   }
 
   // Layer 1.5: Consciousness-informed detection (if available)
@@ -208,7 +225,7 @@ async function scan(text, opts = {}) {
           '',
         ].filter(Boolean).join('\n');
 
-        return {
+        const semanticResult = {
           clean: false,
           findings: [{ detector: 'semantic_injection', severity: 8, confidence: semResult.confidence }],
           maxSeverity: 8,
@@ -217,6 +234,15 @@ async function scan(text, opts = {}) {
           warning,
           output: warning + '\n' + text,
         };
+
+        // Classify influence type
+        if (influenceTaxonomy) {
+          semanticResult.influenceClassifications = influenceTaxonomy.classifyInfluence(
+            semanticResult, { context, toolName, text }
+          );
+        }
+
+        return semanticResult;
       }
     } catch (e) {
       // Wave8-Fix S3: Fail CLOSED, not open — scanner crash = content not verified

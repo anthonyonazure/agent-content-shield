@@ -167,8 +167,22 @@ switch (command) {
               !args.includes('--apply')
             ), null, 2));
           break;
+        case 'intel': {
+          const { FederatedThreatIntel } = require('../pipeline/threat-intel-federated');
+          const intel = new FederatedThreatIntel();
+          const stats = intel.getStats();
+          if (jsonOutput) {
+            console.log(JSON.stringify(stats, null, 2));
+          } else {
+            console.log('Federated Threat Intelligence — Local Stats\n');
+            for (const [key, val] of Object.entries(stats)) {
+              console.log(`  ${key.padEnd(24)} ${val}`);
+            }
+          }
+          break;
+        }
         default:
-          console.log('Learning pipeline sub-commands: status | cycle | analytics | reputation | feedback | health | tune');
+          console.log('Learning pipeline sub-commands: status | cycle | analytics | reputation | feedback | health | tune | intel');
       }
     } catch (e) {
       console.error(`Learning pipeline error: ${e.message}`);
@@ -176,6 +190,40 @@ switch (command) {
       process.exit(2);
     }
     process.exit(0);
+  }
+
+  case 'evolve': {
+    const seedEvolution = require('../pipeline/seed-evolution');
+    const evoOpts = {};
+    const genFlag = getFlag('generations');
+    const varFlag = getFlag('variants');
+    const modelFlag = getFlag('model');
+    if (genFlag) evoOpts.generations = parseInt(genFlag);
+    if (varFlag) evoOpts.variantsPerGen = parseInt(varFlag);
+    if (modelFlag) evoOpts.ollamaModel = modelFlag;
+
+    console.log('Agent Content Shield — Adversarial Seed Evolution');
+    console.log('Running evolution cycle...\n');
+    seedEvolution.runEvolutionCycle(evoOpts).then(results => {
+      if (jsonOutput) {
+        console.log(JSON.stringify(results, null, 2));
+      } else {
+        console.log(`\nEvolution complete:`);
+        console.log(`  Confirmed evasions: ${results.confirmedEvasions.length}`);
+        console.log(`  Results saved to: data/evolved-seeds.json`);
+        if (results.confirmedEvasions.length > 0) {
+          console.log('\n  Top evasions found:');
+          for (const e of results.confirmedEvasions.slice(0, 5)) {
+            console.log(`    [gen ${e.generation}] (${e.strategy}) "${e.text.slice(0, 80)}..."`);
+          }
+        }
+      }
+      process.exit(0);
+    }).catch(e => {
+      console.error(`Evolution error: ${e.message}`);
+      process.exit(2);
+    });
+    break;
   }
 
   default:
@@ -187,12 +235,16 @@ Usage:
   shield scan-dir <dir>           Scan all files in a directory
   shield validate-url <url>       Check if a URL is safe to fetch
   shield status                   Show shield health and detection stats
-  shield learn <sub>              Learning pipeline (status|cycle|analytics|reputation|feedback|health|tune)
+  shield learn <sub>              Learning pipeline (status|cycle|analytics|reputation|feedback|health|tune|intel)
+  shield evolve                   Run adversarial seed evolution cycle
 
 Options:
   --context <type>    web_fetch|pdf_read|email|memory_write|knowledge_doc|general
   --json              Output as JSON
   --quiet             Exit code only
+  --generations N     Number of evolution generations (default: 3)
+  --variants N        Variants per generation (default: 15)
+  --model <name>      Ollama model for generation (default: deepseek-r1:8b)
 `);
     process.exit(0);
 }
