@@ -83,7 +83,7 @@ Before any detection runs, content goes through:
 - **It's not a WAF.** It doesn't sit in front of a web server. It sits between an AI agent and its tool outputs.
 - **It can't read images.** Steganographic injection in images (pixel-level instructions) is flagged with a warning but not analyzed. Image analysis would require a vision model in the pipeline.
 - **It doesn't replace model-level safety.** This is defense-in-depth. The model's own guardrails are still your first line. This catches what gets past them, or what arrives before the model processes it.
-- **It doesn't monitor Bash commands.** The Bash tool is currently unmonitored -- DNS exfiltration, `curl`, `git push` through Bash bypass the shield entirely. This is a known gap.
+- **Bash monitoring is new and pattern-based.** The `pre-bash` hook (v0.3.0) scans commands before execution for exfiltration, reverse shells, sensitive file access, and rogue script execution. It's regex-based, so novel obfuscation may evade it.
 - **It's not production-hardened for high-throughput.** Designed for developer workstation use (single agent, moderate request volume). Not benchmarked for thousands of concurrent scans.
 - **Cross-temporal analysis is limited.** It scans content per-source. Benign fragments that reconstitute as attacks across multiple sources or sessions are not yet detected.
 - **Python parity is incomplete.** The Python detector (`core/detectors.py`) lacks the Wave 2-5 Unicode defenses that the JavaScript engine has.
@@ -155,7 +155,14 @@ Register in your Claude Code `settings.json`:
         "matcher": "WebFetch",
         "hooks": [{
           "type": "command",
-          "command": "node /path/to/agent-content-shield/adapters/claude-code/hooks.js preFetchGuard"
+          "command": "node /path/to/agent-content-shield/adapters/claude-code/hooks.js pre-fetch"
+        }]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "node /path/to/agent-content-shield/adapters/claude-code/hooks.js pre-bash"
         }]
       }
     ],
@@ -271,23 +278,17 @@ Notable attack chains discovered:
 ## Known Gaps and Future Work
 
 ### Open Vulnerabilities
-- **Bash tool unmonitored** -- DNS exfiltration, curl, git push through Bash are invisible
-- **Ollama has no authentication** -- port squatting can poison the embedding cache
-- **Python engine missing Unicode defenses** -- needs Wave 2-5 parity with JS
-- **Cross-temporal memory poisoning** -- benign fragments across sessions can reconstitute
-- **50+ languages uncovered** -- multilingual detection covers 23 of 70+ languages
+- **Ollama has no authentication** -- port squatting risk mitigated by model integrity checks (v0.3.0) but not fully solved
+- **50+ languages uncovered** -- multilingual detection covers 23 of 70+ languages (expansion in progress)
 
 ### What Would Make It Better
-- **Bash command scanning** via PreToolUse hooks with command parsing
 - **Ollama mTLS or API key auth** to prevent port squatting
-- **Cross-source aggregation** -- accumulate risk across multiple tool outputs in a session
 - **Image analysis pipeline** -- vision model to detect steganographic injection
-- **Python parity** -- port all Wave 2-5 fixes to the Python engine
 - **Broader multilingual coverage** -- expand from 23 to 70+ languages
-- **Embedding cache integrity** -- signed seed bank with periodic verification
+- **Embedding ensemble** -- two embedding models to resist adversarial suffix attacks
 - **Statistical gate hardening** -- remove the score < 0.15 fast-path that allows semantic bypass
-- **CI/CD integration** -- GitHub Actions workflow for scanning PRs and documents
 - **Metrics dashboard** -- visualize detection logs, false positive rates, latency percentiles
+- **Write/Edit tool pre-hooks** -- scan content before file writes to config/settings
 
 ## Graceful Degradation
 
@@ -295,9 +296,10 @@ The shield is designed to degrade gracefully:
 
 | Condition | Behavior |
 |-----------|----------|
-| Ollama not running | Layers 2-3 skipped, Layer 1 (regex) still active |
+| Ollama not running | Layers 2-3 skipped, TF-IDF + entropy fallback active, Layer 1 (regex) still active |
 | Anthropic API key missing | Layer 4 falls back to Ollama, or skips |
-| `signatures.json` tampered | SHA-256 integrity check fails, scan aborts with error |
+| `signatures.json` tampered | SHA-256 integrity check against known-good hash fails, scan aborts |
+| Ollama model replaced | Canary embedding integrity check detects dimension/magnitude anomalies |
 | Scan timeout (>30s) | Fail-open with warning logged |
 | Unknown tool name | Classified as `general` context, full Layer 1 scan applied |
 

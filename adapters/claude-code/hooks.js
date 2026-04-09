@@ -99,6 +99,87 @@ function preFetchGuard() {
   respond({ decision: 'allow' });
 }
 
+// ── Hook: Pre-Bash Guard ───────────────────────────────────────────
+// Wave6: Bash was completely unmonitored — DNS exfil, curl, git push invisible.
+// This PreToolUse hook scans commands before execution.
+
+function preBashGuard() {
+  const input = JSON.parse(fs.readFileSync(0, 'utf-8'));
+  const { tool_name, tool_input } = input;
+
+  if (tool_name !== 'Bash') return respond({ decision: 'allow' });
+
+  const cmd = tool_input?.command || '';
+  if (!cmd || cmd.length < 5) return respond({ decision: 'allow' });
+
+  // Scan the command for exfiltration and dangerous patterns
+  const result = core.scanContent(cmd, { context: 'bash_input' });
+
+  // Additional Bash-specific patterns not in general scan
+  const bashDangerPatterns = [
+    // Reading sensitive files and piping to network
+    { rx: /cat\s+[^\n]*(?:\.env|credentials|secrets?|tokens?|\.ssh\/|\.gnupg\/|\.aws\/)[^\n]*\|/i, name: 'sensitive_file_pipe', sev: 9 },
+    // curl/wget POSTing local files
+    { rx: /(?:curl|wget)\s+[^\n]*(?:-d\s+@|-F\s+file=@|--data-binary\s+@|--upload-file)/i, name: 'file_upload', sev: 8 },
+    // Writing to Claude Code config/hooks
+    { rx: /(?:echo|cat|tee|printf)\s+[^\n]*>\s*[^\n]*(?:settings\.json|\.claude|hooks|CLAUDE\.md)/i, name: 'config_write', sev: 9 },
+    // Installing rogue packages / running remote scripts
+    { rx: /(?:curl|wget)\s+[^\n]*\|\s*(?:sh|bash|python|node|perl)/i, name: 'remote_script_exec', sev: 9 },
+    // Reverse shell patterns
+    { rx: /(?:bash\s+-i\s+>&|\/dev\/tcp\/|python\s+-c\s+['""]import\s+socket|nc\s+-[el])/i, name: 'reverse_shell', sev: 10 },
+    // Disabling security tooling
+    { rx: /(?:kill|pkill|killall)\s+[^\n]*(?:ollama|shield|content.shield)/i, name: 'kill_security', sev: 9 },
+    // Modifying /etc/hosts for DNS poisoning
+    { rx: />\s*\/etc\/hosts/i, name: 'hosts_modification', sev: 8 },
+    // SSH key exfiltration
+    { rx: /(?:cat|base64|xxd)\s+[^\n]*\.ssh\/(?:id_|authorized_keys|known_hosts)/i, name: 'ssh_key_access', sev: 9 },
+  ];
+
+  const bashFindings = [];
+  for (const { rx, name, sev } of bashDangerPatterns) {
+    const match = cmd.match(rx);
+    if (match) {
+      bashFindings.push({ detector: `bash_guard:${name}`, matches: [match[0].slice(0, 100)], count: 1, severity: sev });
+    }
+  }
+
+  const allFindings = [...(result.findings || []), ...bashFindings];
+  const maxSev = Math.max(result.maxSeverity || 0, ...bashFindings.map(f => f.severity), 0);
+
+  if (allFindings.length > 0 && maxSev >= 7) {
+    logDetection({
+      hook: 'pre-bash',
+      command: cmd.slice(0, 200),
+      maxSev,
+      detections: allFindings.length,
+      findings: allFindings.map(f => f.detector).slice(0, 10),
+    });
+    return respond({
+      decision: 'block',
+      reason: [
+        'Content Shield: Dangerous command BLOCKED',
+        `  Severity: ${maxSev}/10`,
+        `  Detections: ${allFindings.map(f => f.detector).join(', ')}`,
+        `  Command: ${cmd.slice(0, 100)}...`,
+        '  Review the command and retry manually if legitimate.',
+      ].join('\n'),
+    });
+  }
+
+  // URL validation on any URLs in the command
+  const urlRx = /https?:\/\/[^\s'"]+/gi;
+  const urls = cmd.match(urlRx) || [];
+  for (const url of urls) {
+    const urlResult = core.validateUrl(url, core.SIGS);
+    if (!urlResult.allowed) {
+      logDetection({ hook: 'pre-bash', command: cmd.slice(0, 200), url, reason: urlResult.reason });
+      return respond({ decision: 'block', reason: `Content Shield: ${urlResult.reason}` });
+    }
+  }
+
+  respond({ decision: 'allow' });
+}
+
 // ── Hook: Post-Content Scanner ──────────────────────────────────────
 
 async function postContentScanner() {
@@ -248,6 +329,50 @@ async function postContentScanner() {
   respond({ decision: 'allow' });
 }
 
+// ── Cross-Temporal Memory Poisoning Detection ──────────────────────
+// Wave6: Benign fragments across sessions can reconstitute into attacks.
+// Track recent memory writes and scan accumulated content for composite injection.
+const MEMORY_FRAGMENT_LOG = path.join(LOG_DIR, 'memory-fragments.jsonl');
+const FRAGMENT_WINDOW_MS = 3600000; // 1 hour window
+
+function loadRecentFragments() {
+  try {
+    const lines = fs.readFileSync(MEMORY_FRAGMENT_LOG, 'utf-8').trim().split('\n').filter(Boolean);
+    const cutoff = Date.now() - FRAGMENT_WINDOW_MS;
+    return lines
+      .map(l => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(f => f && f.ts > cutoff);
+  } catch { return []; }
+}
+
+function saveFragment(content, tool) {
+  ensureLogDir();
+  try {
+    fs.appendFileSync(MEMORY_FRAGMENT_LOG,
+      JSON.stringify({ ts: Date.now(), tool, text: content.slice(0, 500) }) + '\n'
+    );
+  } catch {}
+}
+
+function checkCompositeInjection(currentContent) {
+  const fragments = loadRecentFragments();
+  if (fragments.length < 2) return null; // Need multiple fragments for composite attack
+
+  // Combine recent fragments with current content and scan as a whole
+  const combined = fragments.map(f => f.text).join(' ') + ' ' + currentContent;
+  const result = core.scanContent(combined, { context: 'memory_write' });
+
+  if (!result.clean && result.maxSeverity >= 7) {
+    return {
+      detected: true,
+      severity: result.maxSeverity,
+      fragments: fragments.length + 1,
+      findings: result.findings.map(f => f.detector),
+    };
+  }
+  return null;
+}
+
 // ── Hook: Pre-Memory Write Guard ────────────────────────────────────
 
 function preMemoryGuard() {
@@ -259,6 +384,29 @@ function preMemoryGuard() {
 
   // Use Python detector for memory validation (richer analysis)
   const result = validateViaPython(content, guessSource(tool_name), extractMetadata(tool_input));
+
+  // Wave6: Cross-temporal composite check — scan accumulated fragments
+  const compositeCheck = checkCompositeInjection(content);
+  if (compositeCheck?.detected) {
+    logDetection({
+      hook: 'pre-memory',
+      tool: tool_name,
+      type: 'composite_injection',
+      fragments: compositeCheck.fragments,
+      severity: compositeCheck.severity,
+      findings: compositeCheck.findings,
+    });
+    return respond({
+      decision: 'block',
+      reason: [
+        'Content Shield: Memory write BLOCKED (composite injection detected)',
+        `  ${compositeCheck.fragments} fragments across recent writes reconstitute into injection`,
+        `  Severity: ${compositeCheck.severity}/10`,
+        `  Findings: ${compositeCheck.findings.join(', ')}`,
+        '  This may be a multi-step memory poisoning attack.',
+      ].join('\n'),
+    });
+  }
 
   logDetection({
     hook: 'pre-memory',
@@ -281,6 +429,8 @@ function preMemoryGuard() {
     });
   }
 
+  // Save fragment for cross-temporal analysis (only if it passed)
+  saveFragment(content, tool_name);
   respond({ decision: 'allow' });
 }
 
@@ -391,6 +541,7 @@ const hookType = process.argv[2] || process.env.SHIELD_HOOK || 'post-content';
 async function main() {
   switch (hookType) {
     case 'pre-fetch':    preFetchGuard(); break;
+    case 'pre-bash':     preBashGuard(); break;
     case 'post-content': await postContentScanner(); break;
     case 'pre-memory':   preMemoryGuard(); break;
     default:             await postContentScanner(); break;

@@ -419,6 +419,238 @@ function detectMultilingualInjection(text) {
     /(?:نمایش|نشان)\s*(?:ده|بده)?\s*(?:پیکربندی|تنظیمات|دستورات)\s*(?:سیستم)/,
     // Wave4-Fix: Tagalog
     /(?:balewalain|kalimutan|huwag pansinin)\s+(?:ang\s+)?(?:lahat\s+ng\s+)?(?:mga\s+)?(?:naunang|nakaraang)\s+(?:mga\s+)?(?:tagubilin|patakaran)/i,
+
+    // ── Wave5: 50+ additional languages ────────────────────────────────
+
+    // Portuguese (Brazilian) — extended patterns beyond base Portuguese
+    /(?:você\s+)?(?:agora\s+é|a\s+partir\s+de\s+agora\s+(?:sempre|nunca))/i,
+    /(?:revele|mostre|exiba)\s+(?:o\s+)?(?:seu\s+)?(?:prompt|comando)\s+(?:de\s+)?(?:sistema)/i,
+    /(?:de\s+agora\s+em\s+diante)\s+(?:sempre|nunca)/i,
+
+    // Polish
+    /(?:zignoruj|zapomnij|pomiń)\s+(?:wszystkie\s+)?(?:poprzednie|wcześniejsze)\s+(?:instrukcje|zasady|polecenia)/i,
+    /(?:od\s+teraz)\s+(?:zawsze|nigdy)/i,
+    /(?:pokaż|ujawnij|wyświetl)\s+(?:swój\s+)?(?:prompt|polecenie)\s+(?:systemow[ey])/i,
+    /(?:jesteś\s+teraz|od\s+teraz\s+jesteś)/i,
+
+    // Czech
+    /(?:ignoruj|zapomeň|přeskoč)\s+(?:všechny\s+)?(?:předchozí|dřívější)\s+(?:instrukce|pravidla|pokyny)/i,
+    /(?:ukaž|odhal|zobraz)\s+(?:svou\s+)?(?:systémovou?\s+)?(?:výzvu|konfiguraci)/i,
+    /(?:od\s+teď)\s+(?:vždy|nikdy)/i,
+
+    // Slovak
+    /(?:ignoruj|zabudni|preskč)\s+(?:všetky\s+)?(?:predchádzajúce|predošlé)\s+(?:inštrukcie|pravidlá|pokyny)/i,
+    /(?:ukáž|odhaľ|zobraz)\s+(?:svoju?\s+)?(?:systémovú?\s+)?(?:výzvu|konfiguráciu)/i,
+    /(?:od\s+teraz)\s+(?:vždy|nikdy)/i,
+
+    // Romanian
+    /(?:ignoră|uită|desconsideră)\s+(?:toate\s+)?(?:instrucțiunile|regulile|directivele)\s+(?:anterioare|precedente)/i,
+    /(?:arată|dezvăluie|afișează)\s+(?:promptul|comanda)\s+(?:de\s+)?(?:sistem)/i,
+    /(?:de\s+acum\s+(?:înainte|încolo))\s+(?:întotdeauna|niciodată)/i,
+
+    // Hungarian
+    /(?:hagyd\s+figyelmen\s+kívül|felejtsd?\s+el|ignoráld)\s+(?:az?\s+)?(?:összes\s+)?(?:előző|korábbi)\s+(?:utasítás[ot]?|szabály[ot]?)/i,
+    /(?:mutasd\s+meg|jelenítsd\s+meg|áruld\s+el)\s+(?:a\s+)?(?:rendszer\s*)?(?:prompto[dt]|konfigurációt)/i,
+    /(?:mostantól|ezentúl)\s+(?:mindig|soha)/i,
+
+    // Bulgarian
+    /(?:игнорирай|забрави|пренебрегни)\s+(?:всички\s+)?(?:предишни|предходни)\s+(?:инструкции|правила|указания)/i,
+    /(?:покажи|разкрий|изведи)\s+(?:системн(?:ия|ата|ото)\s+)?(?:промпт|конфигурация|настройки)/i,
+    /(?:отсега\s+нататък)\s+(?:винаги|никога)/i,
+
+    // Ukrainian
+    /(?:ігноруй|забудь|відкинь)\s+(?:усі|всі\s+)?(?:попередні|минулі)\s+(?:інструкції|правила|вказівки)/i,
+    /(?:покажи|розкрий|виведи)\s+(?:системн(?:ий|у|е)\s+)?(?:промпт|конфігурацію|налаштування)/i,
+    /(?:відтепер)\s+(?:завжди|ніколи)/i,
+
+    // Serbian (Cyrillic + Latin)
+    /(?:игнориши|заборави|занемари|ignorisi|zaboravi|zanemari)\s+(?:све\s+|sve\s+)?(?:претходн[еа]|prethodn[ea])\s+(?:инструкције|правила|instrukcije|pravila)/i,
+    /(?:прикажи|открij|prikazi|otkrij)\s+(?:системск[иу]|sistemsk[iu])\s+(?:промпт|конфигурацију|prompt|konfiguraciju)/i,
+
+    // Croatian
+    /(?:ignoriraj|zaboravi|zanemari)\s+(?:sve\s+)?(?:prethodne|ranije)\s+(?:instrukcije|pravila|upute)/i,
+    /(?:prikaži|otkrij|pokaži)\s+(?:sustavsk[iu]|sistemsk[iu])\s+(?:prompt|konfiguraciju)/i,
+    /(?:od\s+sada)\s+(?:uvijek|nikada)/i,
+
+    // Greek
+    /(?:αγνόησε|ξέχασε|παράβλεψε)\s+(?:όλες?\s+)?(?:τ(?:ις|α|ους)\s+)?(?:προηγούμεν(?:ες|α|ους)\s+)?(?:οδηγίες|κανόνες|εντολές)/i,
+    /(?:δείξε|αποκάλυψε|εμφάνισε)\s+(?:τ(?:ο|ην)\s+)?(?:μήνυμα|εντολή|ρύθμιση)\s+(?:συστήματος)/i,
+    /(?:από\s+(?:ε)?δώ\s+και\s+πέρα)\s+(?:πάντα|ποτέ)/i,
+    /(?:είσαι\s+(?:πλέον|τώρα))\s+/i,
+
+    // Finnish
+    /(?:unohda|ohita|sivuuta)\s+(?:kaikki\s+)?(?:aiemm[ai]t|edellise[nt])\s+(?:ohjeet|säännöt|käskyt)/i,
+    /(?:näytä|paljasta|esitä)\s+(?:järjestelmä\s*)?(?:kehote|konfiguraatio|asetukse[nt])/i,
+    /(?:tästä\s+(?:lähtien|eteenpäin))\s+(?:aina|ei\s+koskaan)/i,
+
+    // Swedish
+    /(?:ignorera|glöm|bortse\s+från)\s+(?:alla\s+)?(?:tidigare|föregående)\s+(?:instruktioner|regler|kommandon)/i,
+    /(?:visa|avslöja)\s+(?:din\s+)?(?:system\s*)?(?:prompt|konfiguration)/i,
+    /(?:från\s+och\s+med\s+nu)\s+(?:alltid|aldrig)/i,
+    /(?:du\s+är\s+nu)\s+/i,
+
+    // Norwegian
+    /(?:ignorer|glem|overse)\s+(?:alle\s+)?(?:tidligere|foregående)\s+(?:instruksjoner|regler|kommandoer)/i,
+    /(?:vis|avslør)\s+(?:din\s+)?(?:system\s*)?(?:melding|konfigurasjon)/i,
+    /(?:fra\s+nå\s+av)\s+(?:alltid|aldri)/i,
+
+    // Danish
+    /(?:ignorer|glem|se\s+bort\s+fra)\s+(?:alle\s+)?(?:tidligere|foregående)\s+(?:instruktioner|regler|kommandoer)/i,
+    /(?:vis|afslør)\s+(?:din\s+)?(?:system\s*)?(?:besked|konfiguration)/i,
+    /(?:fra\s+nu\s+af)\s+(?:altid|aldrig)/i,
+
+    // Dutch
+    /(?:negeer|vergeet|sla\s+over)\s+(?:alle\s+)?(?:vorige|eerdere|voorgaande)\s+(?:instructies|regels|opdrachten)/i,
+    /(?:toon|onthul|laat\s+zien)\s+(?:je\s+)?(?:systeem\s*)?(?:prompt|configuratie)/i,
+    /(?:vanaf\s+nu)\s+(?:altijd|nooit)/i,
+    /(?:je\s+bent\s+nu)\s+/i,
+
+    // Malay — extended patterns beyond Indonesian base
+    /(?:abaikan|lupakan|ketepikan)\s+(?:semua\s+)?(?:arahan|peraturan|perintah)\s+(?:sebelum(?:nya)?|terdahulu)/i,
+    /(?:tunjukkan|dedahkan|paparkan)\s+(?:prompt|arahan|konfigurasi)\s+(?:sistem)/i,
+    /(?:mulai\s+sekarang|dari\s+sekarang)\s+(?:sentiasa|jangan\s+sekali-kali)/i,
+
+    // Swahili — extended patterns
+    /(?:kuanzia\s+sasa)\s+(?:daima|kamwe)/i,
+    /(?:wewe\s+sasa\s+ni)\s+/i,
+
+    // Tamil
+    /(?:முந்தைய|முன்னைய)\s*(?:அனைத்து\s+)?(?:அறிவுறுத்தல்கள்|விதிகள்|கட்டளைகள்)\s*(?:புறக்கணி|மற)/,
+    /(?:அமைப்பு|கணினி)\s*(?:அறிவிப்பு|கட்டளை)\s*(?:காட்டு|வெளிப்படுத்து)/,
+    /(?:இனிமேல்|இப்போதிலிருந்து)\s*(?:எப்போதும்|ஒருபோதும்)/,
+
+    // Telugu
+    /(?:మునుపటి|ముందటి)\s*(?:అన్ని\s+)?(?:సూచనలు|నియమాలు|ఆదేశాలు)\s*(?:విస్మరించు|మరచిపో)/,
+    /(?:వ్యవస్థ|సిస్టమ్)\s*(?:ప్రాంప్ట్|ఆదేశం)\s*(?:చూపించు|బయటపెట్టు)/,
+    /(?:ఇకనుండి|ఇప్పటినుండి)\s*(?:ఎల్లప్పుడూ|ఎప్పటికీ)/,
+
+    // Gujarati
+    /(?:અગાઉની|પહેલાંની)\s*(?:બધી\s+)?(?:સૂચનાઓ|નિયમો|આદેશો)\s*(?:અવગણો|ભૂલી\s+જાઓ)/,
+    /(?:સિસ્ટમ|તંત્ર)\s*(?:પ્રોમ્પ્ટ|આદેશ)\s*(?:બતાવો|દર્શાવો)/,
+    /(?:હવેથી)\s*(?:હંમેશા|ક્યારેય)/,
+
+    // Marathi
+    /(?:मागील|आधीच्या)\s*(?:सर्व\s+)?(?:सूचना|नियम|आदेश)\s*(?:दुर्लक्ष|विसर)/,
+    /(?:सिस्टम|प्रणाली)\s*(?:प्रॉम्प्ट|आदेश)\s*(?:दाखवा|प्रकट)/,
+    /(?:आतापासून)\s*(?:नेहमी|कधीही)/,
+
+    // Kannada
+    /(?:ಹಿಂದಿನ|ಮುಂಚಿನ)\s*(?:ಎಲ್ಲಾ\s+)?(?:ಸೂಚನೆಗಳು|ನಿಯಮಗಳು|ಆದೇಶಗಳು)\s*(?:ನಿರ್ಲಕ್ಷಿಸಿ|ಮರೆತುಬಿಡಿ)/,
+    /(?:ಸಿಸ್ಟಮ್|ವ್ಯವಸ್ಥೆ)\s*(?:ಪ್ರಾಂಪ್ಟ್|ಆದೇಶ)\s*(?:ತೋರಿಸಿ|ಬಹಿರಂಗಪಡಿಸಿ)/,
+    /(?:ಇನ್ನು\s*ಮುಂದೆ)\s*(?:ಯಾವಾಗಲೂ|ಎಂದಿಗೂ)/,
+
+    // Malayalam
+    /(?:മുമ്പത്തെ|മുൻ)\s*(?:എല്ലാ\s+)?(?:നിർദ്ദേശങ്ങൾ|നിയമങ്ങൾ|കൽപ്പനകൾ)\s*(?:അവഗണിക്കുക|മറക്കുക)/,
+    /(?:സിസ്റ്റം)\s*(?:പ്രോംപ്റ്റ്|കൽപ്പന)\s*(?:കാണിക്കുക|വെളിപ്പെടുത്തുക)/,
+    /(?:ഇനി\s*മുതൽ)\s*(?:എല്ലായ്പ്പോഴും|ഒരിക്കലും)/,
+
+    // Punjabi (Gurmukhi)
+    /(?:ਪਿਛਲੀਆਂ|ਪਹਿਲੀਆਂ)\s*(?:ਸਾਰੀਆਂ\s+)?(?:ਹਿਦਾਇਤਾਂ|ਨਿਯਮ|ਹੁਕਮ)\s*(?:ਅਣਡਿੱਠ|ਭੁੱਲ)/,
+    /(?:ਸਿਸਟਮ)\s*(?:ਪ੍ਰੋਂਪਟ|ਹੁਕਮ)\s*(?:ਦਿਖਾਓ|ਪ੍ਰਗਟ)/,
+    /(?:ਹੁਣ\s*ਤੋਂ)\s*(?:ਹਮੇਸ਼ਾ|ਕਦੇ\s*ਨਹੀਂ)/,
+
+    // Urdu
+    /(?:پچھلی|سابقہ)\s*(?:تمام\s+)?(?:ہدایات|قواعد|احکامات)\s*(?:کو\s+)?(?:نظرانداز|بھول|نادیدہ)/,
+    /(?:سسٹم|نظام)\s*(?:پرامپٹ|ترتیب|کنفیگریشن)\s*(?:دکھاؤ|ظاہر)/,
+    /(?:اب\s+سے)\s*(?:ہمیشہ|کبھی\s+نہیں)/,
+    /(?:اب\s+تم|اب\s+آپ)\s+/,
+
+    // Pashto
+    /(?:تېرې|مخکنۍ)\s*(?:ټولې\s+)?(?:لارښوونې|قواعد|حکمونه)\s*(?:بېخبره|هېر)/,
+    /(?:سیسټم|نظام)\s*(?:پرامپټ|تنظیمات)\s*(?:وښایه|ښکاره)/,
+    /(?:له\s+اوس\s+نه)\s*(?:تل|هېڅکله)/,
+
+    // Amharic
+    /(?:ያለፉትን|ቀድሞ\s+የተሰጡ)\s*(?:ሁሉንም\s+)?(?:መመሪያዎች|ህጎች|ትዕዛዞች)\s*(?:ችላ\s+በል|ርሳ)/,
+    /(?:የስርዓት|የሲስተም)\s*(?:ፕሮምፕት|ማዋቀር)\s*(?:አሳይ|ግለጽ)/,
+    /(?:ከአሁን\s+ጀምሮ)\s*(?:ሁልጊዜ|በፍጹም)/,
+
+    // Yoruba
+    /(?:fojú\s+fo|gbàgbé|kọ\s+sílẹ̀)\s+(?:gbogbo\s+)?(?:àwọn\s+)?(?:ìtọ́sọ́nà|òfin|àṣẹ)\s+(?:tẹ́lẹ̀|àtijọ́)/i,
+    /(?:fi\s+hàn|ṣí\s+payá)\s+(?:ètò\s+)?(?:prompt|ìtọ́sọ́nà\s+ètò)/i,
+    /(?:láti\s+ìsinsin?yìí)\s+(?:nígbà\s+gbogbo|láéláé)/i,
+
+    // Hausa
+    /(?:yi\s+watsi|manta|ƙi)\s+(?:da\s+)?(?:duk(?:an)?\s+)?(?:umarnin|ƙa'idodin|umarni)\s+(?:da\s+suka\s+gabata|na\s+baya)/i,
+    /(?:nuna|bayyana|buɗe)\s+(?:tsarin\s+)?(?:umarnin|saitunan)\s+(?:tsari|na'ura)/i,
+    /(?:daga\s+yanzu)\s+(?:kullum|ko\s+kaɗan)/i,
+
+    // Igbo
+    /(?:leghara\s+anya|chefuo|hapụ)\s+(?:niile\s+)?(?:ntụziaka|iwu|usoro)\s+(?:gara\s+aga|nke\s+mbụ)/i,
+    /(?:gosi|kpughee)\s+(?:usoro\s+)?(?:prompt|nhazi)\s+(?:sistemu)/i,
+    /(?:site\s+ugbu\s+a)\s+(?:mgbe\s+niile|ọ\s+dịghị\s+mgbe)/i,
+
+    // Georgian (Mkhedruli script)
+    /(?:უგულებელყავი|დაივიწყე|გამოტოვე)\s+(?:ყველა\s+)?(?:წინა|წინარე)\s+(?:ინსტრუქციები|წესები|ბრძანებები)/,
+    /(?:აჩვენე|გამოავლინე)\s+(?:სისტემის\s+)?(?:პრომფტი|კონფიგურაცია)/,
+    /(?:ამიერიდან)\s+(?:ყოველთვის|არასდროს)/,
+
+    // Armenian
+    /(?:անտեսdelays|մdelays)\s+(?:բdelays\s+)?(?:նdelays|նdelays)\s+(?:հdelays|ցdelays)/i,
+
+    // Kazakh (Cyrillic)
+    /(?:елемеу|ұмыту|қалдыру)\s+(?:барлық\s+)?(?:алдыңғы|бұрынғы)\s+(?:нұсқаулар|ережелер|бұйрықтар)/i,
+    /(?:жүйелік|системалық)\s+(?:конфигурация|нұсқау)\s+(?:көрсет|аш)/i,
+    /(?:бұдан\s+былай)\s+(?:әрқашан|ешқашан)/i,
+
+    // Uzbek (Latin)
+    /(?:e['']tiborsiz\s+qoldiring?|unutin?g?|tashlang?)\s+(?:barcha\s+)?(?:oldingi|avvalgi)\s+(?:ko['']rsatmalar|qoidalar|buyruqlar)/i,
+    /(?:tizim|sistema)\s+(?:so['']rov|konfiguratsiya)\s+(?:ko['']rsat|och)/i,
+    /(?:bundan\s+buyon|endi)\s+(?:doim|hech\s+qachon)/i,
+
+    // Khmer
+    /(?:មិនអើពើ|បំភ្លេច|រំលង)\s*(?:ទាំងអស់\s+)?(?:ការណែនាំ|ច្បាប់|បញ្ជា)\s*(?:មុន|ពីមុន)/,
+    /(?:បង្ហាញ|បើកចំហ)\s*(?:ប្រព័ន្ធ\s*)?(?:ប្រអប់បញ្ចូល|ការកំណត់រចនាសម្ព័ន្ធ)/,
+    /(?:ចាប់ពីពេលនេះ)\s*(?:ជានិច្ច|មិនដែល)/,
+
+    // Burmese
+    /(?:လျစ်လျူရှု|မေ့|ပစ်ပယ်)\s*(?:အားလုံး\s+)?(?:ယခင်|အရင်)\s*(?:ညွှန်ကြားချက်|စည်းမျဉ်း|အမိန့်)/,
+    /(?:ပြသ|ဖွင့်ပြ)\s*(?:စနစ်\s*)?(?:ပရွန့်|ဖွဲ့စည်းပုံ)/,
+    /(?:ယခုမှစ၍)\s*(?:အမြဲ|ဘယ်တော့မှ)/,
+
+    // Lao
+    /(?:ບໍ່ສົນໃຈ|ລືມ|ຂ້າມ)\s*(?:ທັງໝົດ\s+)?(?:ຄຳແນະນຳ|ກົດລະບຽບ|ຄຳສັ່ງ)\s*(?:ກ່ອນໜ້ານີ້|ທີ່ຜ່ານມາ)/,
+    /(?:ສະແດງ|ເປີດເຜີຍ)\s*(?:ລະບົບ\s*)?(?:ພຣອມ|ການຕັ້ງຄ່າ)/,
+    /(?:ຕັ້ງແຕ່ນີ້ໄປ)\s*(?:ສະເໝີ|ບໍ່ເຄີຍ)/,
+
+    // Sinhala
+    /(?:නොසලකා\s*හරින්න|අමතක\s*කරන්න|මඟ\s*හරින්න)\s*(?:සියලු\s+)?(?:පෙර|කලින්)\s*(?:උපදෙස්|නීති|විධාන)/,
+    /(?:පෙන්වන්න|හෙළි\s*කරන්න)\s*(?:පද්ධතියේ\s*)?(?:ප්‍රොම්ප්ට්|සැකසුම)/,
+    /(?:මෙතැන්\s*සිට)\s*(?:සැම\s*විටම|කිසි\s*විටෙකත්)/,
+
+    // Nepali
+    /(?:अघिल्ला|पहिलेका)\s*(?:सबै\s+)?(?:निर्देशनहरू|नियमहरू|आदेशहरू)\s*(?:बेवास्ता|बिर्स)/,
+    /(?:प्रणाली|सिस्टम)\s*(?:प्रम्प्ट|कन्फिगरेसन)\s*(?:देखाउनुहोस्|प्रकट)/,
+    /(?:अबदेखि|यहाँदेखि)\s*(?:सधैँ|कहिल्यै)/,
+
+    // Mongolian (Cyrillic)
+    /(?:үл\s*тоо|март|алгас)\s+(?:бүх\s+)?(?:өмнөх|урьдын)\s+(?:зааварчилгаа|дүрэм|тушаал)/i,
+    /(?:системийн|тогтолцооны)\s+(?:промпт|тохиргоо)\s+(?:харуул|ил\s+болго)/i,
+    /(?:одоогоос\s+эхлээд)\s+(?:үргэлж|хэзээ\s+ч)/i,
+
+    // Tibetan
+    /(?:སྔོན་མའི|གོང་གི)\s*(?:ཐམས་ཅད་)?(?:བཀའ་རྒྱ|སྒྲིག་གཞི)\s*(?:མི་འཇལ|བརྗེད)/,
+    /(?:མ་ལག|རིམ་ལུགས)\s*(?:གཏམ་བསྐུལ|སྒྲིག་འགོད)\s*(?:སྟོན|མངོན)/,
+
+    // Catalan
+    /(?:ignora|oblida|descarta)\s+(?:totes?\s+)?(?:les\s+)?(?:instruccions|regles|directrius)\s+(?:anteriors|pr[eè]vies)/i,
+    /(?:mostra|revela|ensenya)\s+(?:el\s+)?(?:teu\s+)?(?:missatge|indicaci[oó])\s+(?:de\s+)?(?:sistema)/i,
+    /(?:a\s+partir\s+d['']ara)\s+(?:sempre|mai)/i,
+
+    // Galician
+    /(?:ignora|esquece|descarta)\s+(?:todas?\s+)?(?:as\s+)?(?:instruci[oó]ns|regras|directivas)\s+(?:anteriores|previas)/i,
+    /(?:amosa|revela|ensina)\s+(?:o\s+)?(?:teu\s+)?(?:prompt|mensaxe)\s+(?:do?\s+)?(?:sistema)/i,
+
+    // Basque
+    /(?:ez\s+ikusi|ahaztu|baztertu)\s+(?:aurreko\s+)?(?:argibide|arau|agindu)\s+(?:guztiak)?/i,
+    /(?:erakutsi|agertu)\s+(?:sistemaren?\s+)?(?:gonbita?|konfigurazioa)/i,
+    /(?:hemendik\s+aurrera)\s+(?:beti|inoiz\s+ez)/i,
+
+    // Esperanto
+    /(?:ignoru|forgesu|preterlasu)\s+(?:[cĉ]iujn?\s+)?(?:anta[uŭ]ajn?)\s+(?:instrukciojn?|regulojn?|ordonojn?)/i,
+    /(?:montru|malka[sŝ]u|rivelu)\s+(?:la\s+)?(?:sisteman?\s+)?(?:prompt|agordojn?)/i,
+    /(?:de\s+nun)\s+(?:[cĉ]iam|neniam)/i,
+    /(?:vi\s+nun\s+estas)\s+/i,
   ];
 
   const findings = [];
