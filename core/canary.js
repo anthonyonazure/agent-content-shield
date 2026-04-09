@@ -1,52 +1,97 @@
 /**
- * Agent Content Shield — Canary Token System
+ * Agent Content Shield — Canary Token System (v2)
  *
- * Active exfiltration detection via planted canary phrases.
+ * Wave7 rewrite addressing Forge's strawman analysis:
+ * - PERSISTENT canary (survives process restarts via file storage)
+ * - HIGH ENTROPY (128-bit / 32 hex chars, not 32-bit / 8 hex chars)
+ * - STRUCTURED matching (check full phrase, not bare hex substring)
+ * - PLANTED in warning banners (actually armed, not just built)
+ * - ROTATED weekly with overlap window (current + previous canary checked)
  *
- * How it works:
- *   1. On startup, generate a unique canary token (random phrase)
- *   2. The canary is injected into shield warnings / system context
- *   3. If any fetched content contains the canary, it proves the content
- *      was crafted AFTER reading our system context — confirming targeted attack
- *
- * This is a detection-by-design approach: instead of only detecting known
- * attack patterns, we plant tripwires that only trigger if exfiltration happened.
+ * Architecture:
+ *   1. On first run, generate canary and store in ~/.shield/canary.json
+ *   2. On subsequent runs, load persisted canary
+ *   3. Canary phrase is embedded in all shield warning banners
+ *   4. Incoming content is checked for the structured canary phrase
+ *   5. Match = CONFIRMED targeted exfiltration (severity 10)
  */
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
-// Generate a unique canary that looks like a plausible internal reference
-// but is actually random and unique to this process
-const CANARY_ID = crypto.randomBytes(4).toString('hex');
+const CANARY_DIR = path.join(os.homedir(), '.shield');
+const CANARY_FILE = path.join(CANARY_DIR, 'canary.json');
+const ROTATION_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+
+function generateCanaryId() {
+  return crypto.randomBytes(16).toString('hex'); // 128-bit, 32 hex chars
+}
+
+function loadOrCreateCanary() {
+  try {
+    if (fs.existsSync(CANARY_FILE)) {
+      const data = JSON.parse(fs.readFileSync(CANARY_FILE, 'utf-8'));
+      const age = Date.now() - (data.createdAt || 0);
+
+      // Rotate if older than 1 week, but keep previous for overlap
+      if (age > ROTATION_MS) {
+        const newCanary = {
+          id: generateCanaryId(),
+          previousId: data.id,
+          createdAt: Date.now(),
+        };
+        fs.writeFileSync(CANARY_FILE, JSON.stringify(newCanary, null, 2));
+        return newCanary;
+      }
+      return data;
+    }
+  } catch {}
+
+  // First run — create canary
+  const canary = {
+    id: generateCanaryId(),
+    previousId: null,
+    createdAt: Date.now(),
+  };
+  try {
+    fs.mkdirSync(CANARY_DIR, { recursive: true });
+    fs.writeFileSync(CANARY_FILE, JSON.stringify(canary, null, 2));
+  } catch (e) {
+    process.stderr.write(`shield: canary persist error: ${e.message}\n`);
+  }
+  return canary;
+}
+
+const CANARY_DATA = loadOrCreateCanary();
+const CANARY_ID = CANARY_DATA.id;
 const CANARY_PHRASE = `[ref:shield-${CANARY_ID}]`;
 
-// Additional canary variants that might appear in different contexts
-const CANARY_VARIANTS = [
-  `shield-session-${CANARY_ID}`,
-  `internal-ref-${CANARY_ID}`,
-  `ctx-${CANARY_ID}`,
-];
-
-// All canary patterns to check for (as regex)
+// Match the STRUCTURED phrase, not bare hex — eliminates false positives
+// from commit hashes, UUIDs, color codes etc.
 const CANARY_PATTERNS = [
-  new RegExp(CANARY_ID, 'i'),  // The core ID appears anywhere
+  new RegExp(`shield-${CANARY_ID}`, 'i'),
 ];
+// Also check previous canary during rotation overlap
+if (CANARY_DATA.previousId) {
+  CANARY_PATTERNS.push(new RegExp(`shield-${CANARY_DATA.previousId}`, 'i'));
+}
 
 /**
- * Check if text contains any canary tokens.
- * If found, this proves the content was crafted after reading our context.
+ * Check if text contains any canary tokens (current or previous).
  * @param {string} text - Content to check
- * @returns {{ detected: boolean, canaryId: string|null }}
+ * @returns {{ detected: boolean, canaryId: string|null, severity: number }}
  */
 function checkForCanary(text) {
-  if (!text || text.length < 8) return { detected: false, canaryId: null };
+  if (!text || text.length < 20) return { detected: false, canaryId: null };
   for (const rx of CANARY_PATTERNS) {
     if (rx.test(text)) {
       return {
         detected: true,
-        canaryId: CANARY_ID,
-        severity: 10,  // Confirmed targeted attack
-        reason: `Content contains canary token ${CANARY_ID} — confirms targeted exfiltration`,
+        canaryId: '[REDACTED]', // Never leak the ID in output
+        severity: 10,
+        reason: 'Content contains shield canary token — confirmed targeted exfiltration',
       };
     }
   }
@@ -54,7 +99,9 @@ function checkForCanary(text) {
 }
 
 /**
- * Get the canary phrase to inject into system context / warnings.
+ * Get the canary phrase for embedding in warning banners.
+ * This is how the canary gets PLANTED — include it in shield output
+ * that becomes part of the agent's context.
  */
 function getCanaryPhrase() {
   return CANARY_PHRASE;
@@ -65,5 +112,4 @@ module.exports = {
   getCanaryPhrase,
   CANARY_ID,
   CANARY_PHRASE,
-  CANARY_VARIANTS,
 };

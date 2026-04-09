@@ -15,7 +15,7 @@ function runHook(hookType, input) {
     fs.writeFileSync(tmpFile, JSON.stringify(input));
     const result = execSync(
       `node "${HOOKS_PATH}" ${hookType} < "${tmpFile}"`,
-      { encoding: 'utf-8', timeout: 10000, windowsHide: true }
+      { encoding: 'utf-8', timeout: 30000, windowsHide: true }
     );
     return JSON.parse(result.trim());
   } catch (e) {

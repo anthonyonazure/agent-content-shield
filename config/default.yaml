@@ -141,8 +141,14 @@ semantic:
   classifier_threshold: 0.70
   # Maximum time for semantic scan (ms) — fail open if exceeded
   max_latency_ms: 30000
-  # Contexts that trigger semantic scan (web_fetch, email, knowledge_query)
+  # Contexts that trigger semantic scan
+  # Wave7-Fix: Previously only 3 contexts — 4 others (mcp_external, bash_output,
+  # general, pdf_read) got regex-only, allowing synonym-chain attacks to pass
   scan_contexts:
     - web_fetch
     - email
     - knowledge_query
+    - mcp_external
+    - bash_output
+    - general
+    - pdf_read

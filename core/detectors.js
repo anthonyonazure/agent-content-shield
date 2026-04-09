@@ -941,15 +941,29 @@ function scanContent(text, opts = {}) {
   // strips diacriticals/combining marks from Turkish, Hindi, Thai, Vietnamese)
   findings.push(...detectMultilingualInjection(originalText));
 
-  // Decode all encodings and rescan decoded content
-  const allDecoded = [
-    ...detectAndDecodeBase64(text),
-    ...detectAndDecodeHex(text),
-    ...detectAndDecodeUrlEncoding(text),
-    ...detectAndDecodeUtf7(text),
-    ...detectAndDecodeQuotedPrintable(text),
-  ];
-  // Wave2-Ghost: ROT13 decode — decode the alphabetic portions and rescan
+  // Wave7-Fix: Recursive encoding decode (chain attacks bypass single-level)
+  // base64(hex(injection)) now decoded up to 3 levels deep
+  function decodeOneLevel(t) {
+    return [
+      ...detectAndDecodeBase64(t),
+      ...detectAndDecodeHex(t),
+      ...detectAndDecodeUrlEncoding(t),
+      ...detectAndDecodeUtf7(t),
+      ...detectAndDecodeQuotedPrintable(t),
+    ];
+  }
+  function recursiveDecode(t, depth = 0) {
+    if (depth >= 3) return [t];
+    const results = [t];
+    for (const d of decodeOneLevel(t)) {
+      if (d !== t && d.length >= 6) {
+        results.push(...recursiveDecode(d, depth + 1));
+      }
+    }
+    return results;
+  }
+  const allDecoded = recursiveDecode(text).filter(d => d !== text);
+  // ROT13 decode
   const rot13Text = text.replace(/[a-zA-Z]/g, c => {
     const base = c <= 'Z' ? 65 : 97;
     return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
@@ -961,6 +975,8 @@ function scanContent(text, opts = {}) {
     for (const [cat, patterns] of Object.entries(PATTERNS.injection)) {
       subFindings.push(...detect(d, patterns, `encoded_injection:${cat}`));
     }
+    subFindings.push(...detectSemanticInjection(d));
+    subFindings.push(...detectFakeSystemContext(d));
     if (subFindings.length > 0) {
       for (const f of subFindings) f.severity = Math.min(10, (f.severity || 8) + 1);
       findings.push(...subFindings);

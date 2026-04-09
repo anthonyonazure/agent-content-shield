@@ -133,6 +133,51 @@ switch (command) {
     process.exit(result.allowed ? 0 : 1);
   }
 
+  case 'learn': {
+    // Learning pipeline commands
+    const subCmd = args[1] || 'status';
+    try {
+      const pipeline = require('../pipeline/index');
+      switch (subCmd) {
+        case 'status':
+          console.log(JSON.stringify(pipeline.getStatus(), null, 2));
+          break;
+        case 'cycle':
+          console.log(JSON.stringify(pipeline.runLearningCycle({
+            dryRun: !args.includes('--apply'),
+          }), null, 2));
+          break;
+        case 'analytics':
+          pipeline.ingest.backfill();
+          console.log(JSON.stringify(pipeline.ingest.analytics(), null, 2));
+          break;
+        case 'reputation':
+          console.log(JSON.stringify(pipeline.reputation.getReputationReport(), null, 2));
+          break;
+        case 'feedback':
+          console.log(JSON.stringify(pipeline.feedback.getFeedbackSummary(), null, 2));
+          break;
+        case 'health':
+          console.log(JSON.stringify(pipeline.health.getHealthReport(parseInt(args[2]) || 24), null, 2));
+          break;
+        case 'tune':
+          console.log(JSON.stringify(
+            pipeline.adaptive.applyAdjustments(
+              pipeline.adaptive.computeAdjustments(),
+              !args.includes('--apply')
+            ), null, 2));
+          break;
+        default:
+          console.log('Learning pipeline sub-commands: status | cycle | analytics | reputation | feedback | health | tune');
+      }
+    } catch (e) {
+      console.error(`Learning pipeline error: ${e.message}`);
+      console.error('Install better-sqlite3 to enable: npm install better-sqlite3');
+      process.exit(2);
+    }
+    process.exit(0);
+  }
+
   default:
     console.log(`
 Agent Content Shield — CLI
@@ -142,6 +187,7 @@ Usage:
   shield scan-dir <dir>           Scan all files in a directory
   shield validate-url <url>       Check if a URL is safe to fetch
   shield status                   Show shield health and detection stats
+  shield learn <sub>              Learning pipeline (status|cycle|analytics|reputation|feedback|health|tune)
 
 Options:
   --context <type>    web_fetch|pdf_read|email|memory_write|knowledge_doc|general
