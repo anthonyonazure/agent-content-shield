@@ -144,7 +144,7 @@ function recordTruePositive(opts) {
 
 function hashContent(content) {
   return crypto.createHash('sha256')
-    .update((content || '').slice(0, 4000))
+    .update(content || '')
     .digest('hex');
 }
 

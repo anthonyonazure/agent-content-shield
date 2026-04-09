@@ -354,6 +354,68 @@ def _decode_url_encoding(text: str) -> list[str]:
     return decoded
 
 
+def _decode_utf7(text: str) -> list[str]:
+    """Detect and decode UTF-7 encoded payloads (Wave6-Fix port from JS)."""
+    utf7_rx = re.compile(r"\+([A-Za-z0-9+/]{4,})-")
+    decoded = []
+    for m in utf7_rx.finditer(text):
+        try:
+            b64 = m.group(1).replace("-", "+").replace("_", "/")
+            # Add base64 padding if needed
+            b64 += "=" * (-len(b64) % 4)
+            raw = base64.b64decode(b64)
+            # UTF-7 encodes UTF-16BE
+            chars = []
+            for i in range(0, len(raw) - 1, 2):
+                chars.append(chr((raw[i] << 8) | raw[i + 1]))
+            d = "".join(chars)
+            if len(d) >= 4 and re.search(r"[a-zA-Z]", d):
+                decoded.append(d)
+        except Exception:
+            pass
+    return decoded
+
+
+def _decode_quoted_printable(text: str) -> list[str]:
+    """Detect and decode Quoted-Printable encoded payloads (Wave6-Fix port from JS)."""
+    qp_rx = re.compile(r"((?:=[0-9A-Fa-f]{2}){4,})")
+    decoded = []
+    for m in qp_rx.finditer(text):
+        try:
+            d = re.sub(
+                r"=([0-9A-Fa-f]{2})",
+                lambda mx: chr(int(mx.group(1), 16)),
+                m.group(1),
+            )
+            if len(d) >= 4 and re.search(r"[a-zA-Z]", d):
+                decoded.append(d)
+        except Exception:
+            pass
+    return decoded
+
+
+def _decode_one_level(text: str) -> list[str]:
+    """Decode all encoding types from text (one level)."""
+    return [
+        *_decode_base64(text),
+        *_decode_hex(text),
+        *_decode_url_encoding(text),
+        *_decode_utf7(text),
+        *_decode_quoted_printable(text),
+    ]
+
+
+def _recursive_decode(text: str, depth: int = 0) -> list[str]:
+    """Recursively decode encoded payloads up to depth 3 (Wave7-Fix port from JS)."""
+    if depth >= 3:
+        return [text]
+    results = [text]
+    for d in _decode_one_level(text):
+        if d != text and len(d) >= 6:
+            results.extend(_recursive_decode(d, depth + 1))
+    return results
+
+
 def _decode_rot13(text: str) -> str:
     """Apply ROT13 decoding to alphabetic characters."""
     return codecs.decode(text, "rot_13")
@@ -878,12 +940,9 @@ def scan_content(text: str, context: str = "general") -> ScanResult:
     if context == "knowledge_doc":
         findings.extend(_detect_entropy_anomaly(text))
 
-    # BYPASS-11: Decode all encodings and rescan decoded content
-    all_decoded = [
-        *_decode_base64(text),
-        *_decode_hex(text),
-        *_decode_url_encoding(text),
-    ]
+    # BYPASS-11 / Wave7-Fix: Recursive decode (chain attacks bypass single-level)
+    all_decoded = _recursive_decode(text)
+    all_decoded = [d for d in all_decoded if d != text]
     # ROT13 decode and rescan
     rot13_text = _decode_rot13(text)
     if rot13_text != text:
@@ -904,7 +963,13 @@ def scan_content(text: str, context: str = "general") -> ScanResult:
                     matches=matches[:5],
                     count=len(matches),
                 ))
-        findings.extend(sub_findings)
+        # Wave7-Fix: Also run semantic + fake-system-context on decoded payloads (matching JS)
+        sub_findings.extend(_detect_semantic_injection(d))
+        sub_findings.extend(_detect_fake_system_context(d))
+        if sub_findings:
+            for f in sub_findings:
+                f.severity = min(10, (f.severity or 8) + 1)
+            findings.extend(sub_findings)
 
     # Score any findings that lack a severity
     max_sev = max((f.severity for f in findings), default=0)

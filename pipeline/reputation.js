@@ -118,10 +118,6 @@ function checkReputation(urlOrSource) {
   if (!domain) return { domain: null, score: 0.5, action: 'allow' };
 
   const stmts = getStmts();
-  const now = new Date().toISOString();
-
-  // Ensure domain exists in reputation table
-  stmts.upsertScan.run({ domain, now });
 
   const record = stmts.get.get(domain);
   if (!record) return { domain, score: 0.5, action: 'allow' };
@@ -163,8 +159,16 @@ function recordDetection(urlOrSource, severity, categories = []) {
   // Ensure domain exists
   stmts.upsertScan.run({ domain, now });
 
-  // Compute reputation delta based on severity
-  const delta = SEVERITY_WEIGHT[severity] || 0.05;
+  // Compute reputation delta based on severity with time-decay
+  let delta = SEVERITY_WEIGHT[severity] || 0.05;
+
+  // Apply time-decay: older offenses carry less weight
+  const record_pre = stmts.get.get(domain);
+  if (record_pre?.first_seen) {
+    const daysSinceFirst = (Date.now() - new Date(record_pre.first_seen).getTime()) / (1000 * 60 * 60 * 24);
+    const decayFactor = Math.pow(0.5, daysSinceFirst / DECAY_HALFLIFE_DAYS);
+    delta *= decayFactor;
+  }
 
   // Get existing categories and merge
   const record = stmts.get.get(domain);
@@ -198,6 +202,9 @@ function recordCleanScan(urlOrSource) {
   const domain = extractDomain(urlOrSource);
   if (!domain) return;
   const stmts = getStmts();
+  const now = new Date().toISOString();
+  // Ensure domain exists (upsert tracks scan count)
+  stmts.upsertScan.run({ domain, now });
   stmts.recordClean.run({ domain });
 }
 

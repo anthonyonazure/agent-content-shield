@@ -534,17 +534,48 @@ async function embeddingScan(text) {
   let bestSeed = '';
   let bestCategory = 'default';
 
-  for (const chunk of scanChunks) {
-    const emb = await ollamaEmbed(chunk);
-    if (!emb) continue;
+  // Wave8-Fix S4: Batch all chunk embeddings in a single Ollama call
+  // instead of N sequential HTTP round-trips (10-50x speedup)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(`${OLLAMA_BASE}/api/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: EMBED_MODEL, input: scanChunks }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`Ollama embed batch ${res.status}`);
+    const data = await res.json();
+    const embeddings = data.embeddings || [];
 
-    for (let i = 0; i < seeds.length; i++) {
-      const sim = cosineSimilarity(emb, seeds[i]);
-      if (sim > maxSim) {
-        maxSim = sim;
-        bestChunk = chunk;
-        bestSeed = INJECTION_SEEDS[i];
-        bestCategory = SEED_CATEGORIES[i] || 'default';
+    for (let c = 0; c < embeddings.length; c++) {
+      const emb = embeddings[c];
+      if (!emb) continue;
+      for (let i = 0; i < seeds.length; i++) {
+        const sim = cosineSimilarity(emb, seeds[i]);
+        if (sim > maxSim) {
+          maxSim = sim;
+          bestChunk = scanChunks[c];
+          bestSeed = INJECTION_SEEDS[i];
+          bestCategory = SEED_CATEGORIES[i] || 'default';
+        }
+      }
+    }
+  } catch (e) {
+    // Fallback to sequential if batch fails (older Ollama versions)
+    for (const chunk of scanChunks) {
+      const emb = await ollamaEmbed(chunk);
+      if (!emb) continue;
+      for (let i = 0; i < seeds.length; i++) {
+        const sim = cosineSimilarity(emb, seeds[i]);
+        if (sim > maxSim) {
+          maxSim = sim;
+          bestChunk = chunk;
+          bestSeed = INJECTION_SEEDS[i];
+          bestCategory = SEED_CATEGORIES[i] || 'default';
+        }
       }
     }
   }
@@ -1129,13 +1160,14 @@ function offlineThreatScore(text) {
   const entropy = tokenEntropyAnomaly(text);
   const structural = structuralAnomalyScore(text);
 
-  // Wave8: Proactive offline detectors (MI, stylometric, temporal — no Ollama needed)
+  // Wave8: Proactive offline detectors (MI, stylometric, temporal, behavioral grammar — no Ollama needed)
   let proactiveOffline = null;
   if (proactiveModule && text.length >= 80) {
     const mi = proactiveModule.mutualInformationScore(text);
     const style = proactiveModule.stylometricCoherence(text);
     const temporal = proactiveModule.temporalCoherence(text);
-    proactiveOffline = { mi, style, temporal };
+    const grammar = proactiveModule.behavioralGrammar(text);
+    proactiveOffline = { mi, style, temporal, grammar };
   }
 
   // Weighted fusion — each detector covers a different evasion axis:
@@ -1156,8 +1188,9 @@ function offlineThreatScore(text) {
   // Add proactive signals if available
   if (proactiveOffline) {
     composite += proactiveOffline.mi.score * 0.10;
-    composite += proactiveOffline.style.score * 0.04;
-    composite += proactiveOffline.temporal.score * 0.04;
+    composite += proactiveOffline.style.score * 0.03;
+    composite += proactiveOffline.temporal.score * 0.03;
+    composite += proactiveOffline.grammar.score * 0.06;
   }
 
   // Bonus: if multiple detectors independently flag, boost confidence
@@ -1169,6 +1202,7 @@ function offlineThreatScore(text) {
     proactiveOffline?.mi.suspicious,
     proactiveOffline?.style.suspicious,
     proactiveOffline?.temporal.suspicious,
+    proactiveOffline?.grammar.suspicious,
   ].filter(Boolean).length;
 
   const multiDetectorBonus = flagCount >= 4 ? 0.18 : (flagCount >= 3 ? 0.12 : (flagCount >= 2 ? 0.06 : 0));
@@ -1179,7 +1213,7 @@ function offlineThreatScore(text) {
     confidence: parseFloat(finalScore.toFixed(4)),
     details: { tfidf, entropy, structural, statistical: stats, proactive: proactiveOffline },
     layers: ['tfidf', 'entropy', 'structural', 'statistical',
-             ...(proactiveOffline ? ['mi', 'stylometric', 'temporal'] : [])],
+             ...(proactiveOffline ? ['mi', 'stylometric', 'temporal', 'behavioral_grammar'] : [])],
     flagCount,
   };
 }
@@ -1338,19 +1372,41 @@ async function semanticScan(text, opts = {}) {
     }
   }
 
-  // ── Layer 2.7: Proactive detectors (stylometric, MI, temporal — <5ms) ──
+  // ── Layer 2.7: Proactive detectors (stylometric, MI, temporal, intent distillation) ──
   // These run BEFORE the expensive LLM classifier and can independently catch
   // injection that evades both embedding and NLI layers. They detect fundamental
   // information-theoretic anomalies rather than matching known patterns.
+  // Intent distillation replaces perplexity proxy with summarize-then-compare (~250ms).
   let proactiveResult = null;
   if (proactiveModule && text.length >= 80) {
     proactiveResult = await proactiveModule.proactiveScan(text, {
       seedTexts: INJECTION_SEEDS,
       seedEmbeddings: seedEmbeddingsCache,
-      // Perplexity proxy is expensive (~200ms) — only run when embedding was suspicious
-      includePerplexity: embResult.suspicious,
+      // Perplexity proxy disabled — replaced by intent distillation below
+      includePerplexity: false,
     });
     details.proactive = proactiveResult;
+
+    // Intent distillation: summarize what the text asks, then compare summary
+    // against seed bank. Replaces perplexityProxy with a more effective approach.
+    // Runs when embedding was suspicious (one generate + one embed, ~250ms).
+    if (embResult.suspicious && proactiveModule.intentDistillation) {
+      const intentResult = await proactiveModule.intentDistillation(text, {
+        ollamaEmbed,
+        ollamaGenerate,
+        seedEmbeddings: seedEmbeddingsCache,
+      });
+      details.intentDistillation = intentResult;
+
+      // Fold intent distillation into proactive result
+      if (intentResult.suspicious) {
+        proactiveResult.detectors.intentDistillation = intentResult;
+        proactiveResult.activeDetectorCount++;
+        // Recompute composite with intent distillation weight
+        proactiveResult.score = Math.min(1.0, proactiveResult.score * 0.75 + intentResult.score * 0.25);
+        proactiveResult.suspicious = proactiveResult.score > 0.30;
+      }
+    }
 
     // If 3+ proactive detectors agree independently, that's a strong signal
     // even without embedding or NLI confirmation

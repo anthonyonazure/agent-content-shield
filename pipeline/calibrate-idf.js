@@ -190,22 +190,23 @@ function computeDiscriminativeIdf(injectionDocs, benignDocs, opts = {}) {
     }
   }
 
-  // Step 3: Normalize to [minWeight, maxWeight] range
-  const maxRaw = Math.max(...rawWeights.values(), 1);
-  const minRaw = Math.min(...rawWeights.values(), 0);
-  const range = maxRaw - minRaw || 1;
+  // Step 3: Normalize to [minWeight, maxWeight] range using log scaling
+  // Log scaling preserves discriminative magnitude better than linear
+  const logWeights = new Map();
+  for (const [term, raw] of rawWeights) {
+    logWeights.set(term, Math.log1p(raw));
+  }
+  const maxLog = Math.max(...logWeights.values());
 
   const weights = {};
   const termStats = [];
 
-  for (const [term, raw] of rawWeights) {
-    const normalized = minWeight + (raw - minRaw) / range * (maxWeight - minWeight);
-    const clamped = parseFloat(Math.max(minWeight, Math.min(maxWeight, normalized)).toFixed(1));
-
-    weights[term] = clamped;
+  for (const [term, logVal] of logWeights) {
+    const raw = rawWeights.get(term);
+    weights[term] = parseFloat((minWeight + (logVal / maxLog) * (maxWeight - minWeight)).toFixed(1));
     termStats.push({
       term,
-      weight: clamped,
+      weight: weights[term],
       rawScore: parseFloat(raw.toFixed(4)),
       injDf: dfInj.get(term) || 0,
       benDf: dfBen.get(term) || 0,

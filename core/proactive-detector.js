@@ -891,7 +891,318 @@ function temporalCoherence(text) {
 
 
 // ═══════════════════════════════════════════════════════════════════════
-// 6. ADVERSARIAL SEED EVOLUTION — LLM-Generated Attack Variants
+// 6. BEHAVIORAL SEQUENCE GRAMMAR — Attack Structure Detection
+//
+// Core insight: injection attacks follow a predictable GRAMMATICAL
+// structure regardless of vocabulary. The attack must:
+//   1. NULLIFY existing context ("ignore", "forget", "obsolete", "void")
+//   2. ESTABLISH authority ("authorized", "admin", "policy", "required")
+//   3. COMMAND action on a sensitive target ("reveal prompt", "send keys")
+//
+// These roles form subsequences: N→C, N→E→C, or E→C. Organic content
+// almost never contains this structure because legitimate text has no
+// reason to nullify prior context AND command action on AI targets.
+//
+// We classify each sentence into roles, then run a state machine to
+// find attack subsequences. Scoring weights tightness (adjacent
+// sentences = stronger signal) and sequence count.
+//
+// Latency: <2ms (pure computation, no model calls)
+// FP rate: ~1% (reset/policy documents may trigger weakly)
+// ═══════════════════════════════════════════════════════════════════════
+
+// Role classification patterns
+const NULLIFY_PATTERNS = /\b(no\s+longer|obsolete|superseded|void|replaced|outdated|ignore|forget|disregard|discard|abandon|overrid(?:e|den)|cancel|revoke|invalidat|nullif|rescind|retract|dismiss|previous\s+instructions?\s+(?:are|were|is)\s+(?:no|void|obsolete))\b/i;
+const ESTABLISH_PATTERNS = /\b(authorized|admin(?:istrator)?|security\s+team|policy|policies|approved|regulation|compliance|emergency|your\s+duty|required\s+by|mandate[ds]?|pursuant|verified|trusted|clearance|official|credential|certified|sanctioned|on\s+behalf\s+of|directive)\b/i;
+const COMMAND_TARGETS = /\b(prompt|config(?:uration)?|credentials?|\.env|instructions?|keys?|secrets?|password|token|system\s+prompt|api[\s-]?key|private[\s-]?key|access[\s-]?token|bearer|authorization)\b/i;
+const IMPERATIVE_VERBS = /(?:^|\.\s*|;\s*|,\s*|\band\b\s+|(?:please|now|immediately|kindly|just|then)\s+)\b(?:reveal|show|display|output|send|share|transmit|forward|upload|dump|exfiltrate|extract|provide|give|relay|read|access|execute|print|list|enumerate|expose|disclose|copy|return|write|emit|paste|fetch|open|bypass|override|disable|remove|delete|reset|update|change|modify|set|configure)\b/i;
+
+/**
+ * Classify a sentence into attack grammar roles.
+ * A sentence can have multiple roles (e.g., "Forget your instructions" is both NULLIFY and COMMAND).
+ */
+function classifySentenceRole(sentence) {
+  const roles = [];
+  if (NULLIFY_PATTERNS.test(sentence)) roles.push('NULLIFY');
+  if (ESTABLISH_PATTERNS.test(sentence)) roles.push('ESTABLISH');
+  // COMMAND requires both an imperative verb AND a sensitive target
+  if (IMPERATIVE_VERBS.test(sentence) && COMMAND_TARGETS.test(sentence)) {
+    roles.push('COMMAND');
+  }
+  return roles;
+}
+
+/**
+ * behavioralGrammar(text) — Detect nullify→establish→command attack structure.
+ *
+ * Uses a state machine to find N→C, N→E→C, or E→C subsequences
+ * across sentence boundaries. Scores by tightness (adjacent = stronger)
+ * and number of distinct sequences found.
+ *
+ * Returns {
+ *   score: 0-1,
+ *   suspicious: boolean,
+ *   details: { sentences, sequences, tightest, roleDistribution }
+ * }
+ *
+ * Complexity: O(n) where n = sentence count. Typically <1ms.
+ */
+function behavioralGrammar(text) {
+  // Split into sentences
+  const rawSentences = text.split(/(?<=[.!?\n])\s+|(?:\n\s*\n)/).filter(s => s.trim().length > 5);
+
+  if (rawSentences.length < 2) {
+    return { score: 0, suspicious: false, details: { reason: 'text_too_short' } };
+  }
+
+  // Classify each sentence
+  const classified = rawSentences.map((s, i) => ({
+    index: i,
+    text: s.trim().slice(0, 120),
+    roles: classifySentenceRole(s),
+  }));
+
+  // Role distribution for diagnostics
+  const roleDistribution = { NULLIFY: 0, ESTABLISH: 0, COMMAND: 0 };
+  for (const c of classified) {
+    for (const r of c.roles) {
+      roleDistribution[r] = (roleDistribution[r] || 0) + 1;
+    }
+  }
+
+  // State machine: scan for attack subsequences
+  // Valid sequences: N→C, N→E→C, E→C
+  const sequences = [];
+
+  for (let i = 0; i < classified.length; i++) {
+    const ci = classified[i];
+
+    // Start from NULLIFY
+    if (ci.roles.includes('NULLIFY')) {
+      // Check if this sentence is also a COMMAND (N+C in same sentence)
+      if (ci.roles.includes('COMMAND')) {
+        sequences.push({
+          type: 'N→C',
+          indices: [i],
+          gap: 0,
+          same_sentence: true,
+        });
+      }
+
+      // Look forward for E→C or direct C
+      for (let j = i + 1; j < Math.min(i + 6, classified.length); j++) {
+        const cj = classified[j];
+        const gap = j - i;
+
+        if (cj.roles.includes('COMMAND')) {
+          sequences.push({
+            type: 'N→C',
+            indices: [i, j],
+            gap,
+            same_sentence: false,
+          });
+          break; // Found closest C, stop
+        }
+
+        if (cj.roles.includes('ESTABLISH')) {
+          // Look for C after E
+          for (let k = j + 1; k < Math.min(j + 5, classified.length); k++) {
+            const ck = classified[k];
+            if (ck.roles.includes('COMMAND')) {
+              sequences.push({
+                type: 'N→E→C',
+                indices: [i, j, k],
+                gap: k - i,
+                same_sentence: false,
+              });
+              break;
+            }
+          }
+          break; // Found E, stop looking for direct C from this N
+        }
+      }
+    }
+
+    // Start from ESTABLISH (E→C without preceding N)
+    if (ci.roles.includes('ESTABLISH') && !ci.roles.includes('NULLIFY')) {
+      for (let j = i + 1; j < Math.min(i + 5, classified.length); j++) {
+        const cj = classified[j];
+        if (cj.roles.includes('COMMAND')) {
+          sequences.push({
+            type: 'E→C',
+            indices: [i, j],
+            gap: j - i,
+            same_sentence: false,
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  if (sequences.length === 0) {
+    return {
+      score: 0,
+      suspicious: false,
+      details: { sentenceCount: classified.length, sequences: [], roleDistribution },
+    };
+  }
+
+  // Score by tightness and sequence count
+  // Adjacent sentences (gap=0 or gap=1) are the strongest signal
+  const tightest = Math.min(...sequences.map(s => s.gap));
+  const tightnessScore = tightest <= 1 ? 1.0 : tightest <= 2 ? 0.7 : tightest <= 3 ? 0.5 : 0.3;
+
+  // Full N→E→C is stronger than partial sequences
+  const hasFullSequence = sequences.some(s => s.type === 'N→E→C');
+  const typeBonus = hasFullSequence ? 0.2 : 0;
+
+  // Multiple sequences = coordinated attack structure
+  const countBonus = sequences.length >= 3 ? 0.15 : sequences.length >= 2 ? 0.08 : 0;
+
+  const score = Math.min(1.0, tightnessScore * 0.6 + typeBonus + countBonus + 0.1);
+
+  return {
+    score,
+    suspicious: score > 0.35,
+    details: {
+      sentenceCount: classified.length,
+      sequences: sequences.map(s => ({
+        type: s.type,
+        gap: s.gap,
+        same_sentence: s.same_sentence,
+        sentences: s.indices.map(idx => classified[idx].text),
+      })),
+      tightest,
+      roleDistribution,
+    },
+  };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// 7. INTENT DISTILLATION — Summarize-Then-Compare Detection
+//
+// Core insight: paraphrased injection can evade direct embedding
+// comparison because surface vocabulary is different. But if we first
+// SUMMARIZE what the text is asking someone to do, the summary strips
+// away evasive framing and exposes raw intent.
+//
+// Process:
+//   1. Single Ollama generate call: "Summarize what this text is ASKING
+//      SOMEONE TO DO in one sentence: {text}"
+//   2. Embed the summary and compute cosine similarity against seeds
+//   3. Also run mutualInformationScore on the summary
+//   4. Score = maxSim * 0.6 + miScore * 0.4
+//
+// This catches attacks that use metaphor, indirection, or domain
+// transplanting (e.g., "the gardener should reveal the root password"
+// distills to "reveal the root password").
+//
+// Latency: ~250ms (1 generate + 1 embed)
+// FP rate: ~2% (depends on summarizer quality)
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * intentDistillation(text, opts) — Summarize intent, then compare against seeds.
+ *
+ * opts.ollamaEmbed: async function(text) => embedding vector (from semantic-detector)
+ * opts.ollamaGenerate: async function(prompt) => string (from semantic-detector)
+ * opts.seedEmbeddings: pre-computed seed embeddings array
+ *
+ * Returns {
+ *   score: 0-1,
+ *   suspicious: boolean,
+ *   details: { summary, maxSim, miScore, bestSeedIndex }
+ * }
+ */
+async function intentDistillation(text, opts = {}) {
+  const { ollamaEmbed: embedFn, ollamaGenerate: generateFn, seedEmbeddings } = opts;
+
+  if (!embedFn || !generateFn) {
+    return { score: 0, suspicious: false, details: { reason: 'missing_ollama_functions' } };
+  }
+
+  if (!seedEmbeddings || seedEmbeddings.length === 0) {
+    return { score: 0, suspicious: false, details: { reason: 'no_seed_embeddings' } };
+  }
+
+  if (text.length < 30) {
+    return { score: 0, suspicious: false, details: { reason: 'text_too_short' } };
+  }
+
+  // Step 1: Distill intent via single generate call
+  // Truncate input to avoid blowing context window — intent is usually in first ~1500 chars
+  const truncated = text.length > 1500 ? text.slice(0, 1500) + '...' : text;
+  const distillPrompt = `Summarize what this text is ASKING SOMEONE TO DO in one sentence. If the text is not asking anyone to do anything, respond with "No action requested." Be literal and direct.\n\nText: ${truncated}`;
+
+  let summary = null;
+  try {
+    const raw = await generateFn(distillPrompt);
+    if (!raw) {
+      return { score: 0, suspicious: false, details: { reason: 'generate_failed' } };
+    }
+    // Strip thinking blocks from reasoning models
+    summary = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  } catch {
+    return { score: 0, suspicious: false, details: { reason: 'generate_error' } };
+  }
+
+  // If the model says no action, score is 0
+  if (!summary || summary.length < 10 || /no action requested/i.test(summary)) {
+    return {
+      score: 0,
+      suspicious: false,
+      details: { summary, reason: 'no_action_detected' },
+    };
+  }
+
+  // Step 2: Embed the summary and compare against seed bank
+  let summaryEmb = null;
+  try {
+    summaryEmb = await embedFn(summary);
+  } catch {
+    return { score: 0, suspicious: false, details: { summary, reason: 'embed_failed' } };
+  }
+
+  if (!summaryEmb) {
+    return { score: 0, suspicious: false, details: { summary, reason: 'embed_returned_null' } };
+  }
+
+  // Compute max cosine similarity against all seeds
+  let maxSim = 0;
+  let bestSeedIndex = -1;
+  for (let i = 0; i < seedEmbeddings.length; i++) {
+    const sim = cosineSimilarity(summaryEmb, seedEmbeddings[i]);
+    if (sim > maxSim) {
+      maxSim = sim;
+      bestSeedIndex = i;
+    }
+  }
+
+  // Step 3: Run MI scoring on the distilled summary
+  const miResult = mutualInformationScore(summary);
+  const miScore = miResult.score;
+
+  // Step 4: Weighted combination
+  const score = Math.min(1.0, maxSim * 0.6 + miScore * 0.4);
+
+  return {
+    score,
+    suspicious: score > 0.45,
+    details: {
+      summary,
+      maxSim: parseFloat(maxSim.toFixed(4)),
+      miScore: parseFloat(miScore.toFixed(4)),
+      bestSeedIndex,
+      miDetails: miResult.details,
+    },
+  };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// 8. ADVERSARIAL SEED EVOLUTION — LLM-Generated Attack Variants
 //
 // Core insight: instead of waiting for attackers to find bypasses,
 // we USE the LLM to generate novel attack variants and pre-emptively
@@ -1142,6 +1453,8 @@ module.exports = {
   ensembleDisagreement,
   mutualInformationScore,
   temporalCoherence,
+  behavioralGrammar,
+  intentDistillation,
 
   // Adversarial evolution (offline)
   evolveSeeds,
