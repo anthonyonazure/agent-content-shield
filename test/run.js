@@ -34,3 +34,18 @@ try {
 } catch (e) {
   process.exit(e.status || 1);
 }
+
+// v0.4.0 suites use a custom lightweight runner (assert + console.log)
+// rather than node:test. Invoke them sequentially after the node:test pass.
+const standaloneSuites = [
+  path.join(__dirname, 'post-flight.test.js'),
+  path.join(__dirname, 'escalation-tracker.test.js'),
+];
+for (const suite of standaloneSuites) {
+  console.log(`\n[i] Running ${path.basename(suite)}`);
+  try {
+    execSync(`node "${suite}"`, { stdio: 'inherit', cwd: path.join(__dirname, '..') });
+  } catch (e) {
+    process.exit(e.status || 1);
+  }
+}

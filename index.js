@@ -68,6 +68,14 @@ try { yoloDetector = require('./core/yolo-detector'); } catch {}
 let providerSignature = null;
 try { providerSignature = require('./core/provider-signature'); } catch {}
 
+// Gap1 (v0.4.0): post-flight output scanner
+let postFlight = null;
+try { postFlight = require('./core/post-flight'); } catch {}
+
+// Gap3 (v0.4.0): multi-turn escalation tracker
+let escalationTracker = null;
+try { escalationTracker = require('./core/escalation-tracker'); } catch {}
+
 module.exports = {
   // Full pipeline (async, uses Ollama if available)
   scan: scanner.scan,
@@ -104,6 +112,14 @@ module.exports = {
   routerTrust,
   yoloDetector,
   providerSignature,
+
+  // Gap1 (v0.4.0): post-flight output scanning
+  scanOutput: postFlight?.scanOutput,
+  postFlight,
+
+  // Gap3 (v0.4.0): multi-turn escalation tracking
+  recordTurn: escalationTracker?.recordTurn,
+  escalationTracker,
 
   // Utilities
   status,

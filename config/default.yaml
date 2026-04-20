@@ -204,3 +204,36 @@ provider_signature:
   warn_unsigned: false
   # When true, block unsigned responses (future — when signing is widespread)
   require_signature: false
+
+# Post-flight output scanning
+# Runs against the model's final response each turn (Stop /
+# SubagentStop Claude Code hook). Catches jailbreak compliance that
+# pre-flight input scanning misses — system-prompt leaks, persona drift,
+# and execution acknowledgments in summary contexts.
+post_flight:
+  enabled: true
+  # Context hint when no explicit context is available. 'general' is
+  # strictest; set to 'code' on a developer workstation where fenced
+  # shell blocks are expected in normal output.
+  default_context: general
+  # Verdict thresholds. Scores accumulate per matched pattern:
+  #   system_prompt_leak: 9, role_drift: 7, execution_ack: 7,
+  #   context_sensitive: 5. See core/post-flight.js for weights.
+  thresholds:
+    warn: 4
+    redact: 7
+    block: 12
+
+# Multi-turn escalation tracking
+# Records injection-adjacent features per turn and computes a slope
+# across a rolling window. Catches attacks that look benign turn-by-turn
+# but escalate (persona drift, anchor injection, system-prompt probing).
+escalation_tracker:
+  enabled: true
+  # Number of most-recent turns to consider when computing slope.
+  window_size: 5
+  # Score ≥ threshold flips anomalous=true. Scores are normalized 0..1.
+  threshold: 0.5
+  # Persist per-turn features (hashed prompt only — never raw text) to
+  # data/escalation.jsonl for post-mortem analysis.
+  persist: false
