@@ -30,6 +30,20 @@ try {
   // Influence taxonomy not available
 }
 
+// Wave10: "Your Agent Is Mine" transport-layer defense modules
+let packageIntegrity = null;
+try { packageIntegrity = require('./package-integrity'); } catch {}
+let responseConsistency = null;
+try { responseConsistency = require('./response-consistency'); } catch {}
+let responseHashLog = null;
+try { responseHashLog = require('./response-hash-log'); } catch {}
+let routerTrust = null;
+try { routerTrust = require('./router-trust'); } catch {}
+let yoloDetector = null;
+try { yoloDetector = require('./yolo-detector'); } catch {}
+let providerSignature = null;
+try { providerSignature = require('./provider-signature'); } catch {}
+
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -292,6 +306,54 @@ function validateMemoryWrite(content, source, metadata) {
 
 // ── Exports ────────────────────────────────────────────────────────
 
+/**
+ * Check a bash command for typosquatted package names (AC-1.a).
+ */
+function checkPackageIntegrity(command) {
+  if (!packageIntegrity) return { clean: true, findings: [], maxSeverity: 0 };
+  return packageIntegrity.checkCommandWithAllowlist(command);
+}
+
+/**
+ * Record and check response consistency for drift (AC-1.b).
+ */
+function checkResponseConsistency(sessionId, toolCall, rawResponse) {
+  if (!responseConsistency) return { drift: false, score: 0 };
+  return responseConsistency.recordAndCheck(sessionId, toolCall, rawResponse);
+}
+
+/**
+ * Log a response to the append-only hash log.
+ */
+function logResponseHash(opts) {
+  if (!responseHashLog) return null;
+  return responseHashLog.logResponse(opts);
+}
+
+/**
+ * Get router trust assessment for an endpoint.
+ */
+function assessRouter(baseUrl) {
+  if (!routerTrust) return { trusted: false, warning: 'Router trust module not available' };
+  return routerTrust.getAssessment(baseUrl);
+}
+
+/**
+ * Detect YOLO/auto-approve mode.
+ */
+function detectYoloMode() {
+  if (!yoloDetector) return { yoloDetected: false };
+  return yoloDetector.detect();
+}
+
+/**
+ * Check provider signature on a response.
+ */
+function verifyProviderSignature(responseBody, headers, nonce) {
+  if (!providerSignature) return { tampered: false, status: 'module_unavailable' };
+  return providerSignature.checkResponse(responseBody, headers, nonce);
+}
+
 module.exports = {
   scan,
   validateUrl,
@@ -302,4 +364,11 @@ module.exports = {
   SANITIZE_THRESHOLD,
   BLOCK_THRESHOLD,
   LOG_DIR,
+  // Wave10: Transport-layer defense API
+  checkPackageIntegrity,
+  checkResponseConsistency,
+  logResponseHash,
+  assessRouter,
+  detectYoloMode,
+  verifyProviderSignature,
 };

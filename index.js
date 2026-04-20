@@ -54,6 +54,20 @@ async function status() {
   };
 }
 
+// Wave10: Transport-layer defense modules
+let packageIntegrity = null;
+try { packageIntegrity = require('./core/package-integrity'); } catch {}
+let responseConsistency = null;
+try { responseConsistency = require('./core/response-consistency'); } catch {}
+let responseHashLog = null;
+try { responseHashLog = require('./core/response-hash-log'); } catch {}
+let routerTrust = null;
+try { routerTrust = require('./core/router-trust'); } catch {}
+let yoloDetector = null;
+try { yoloDetector = require('./core/yolo-detector'); } catch {}
+let providerSignature = null;
+try { providerSignature = require('./core/provider-signature'); } catch {}
+
 module.exports = {
   // Full pipeline (async, uses Ollama if available)
   scan: scanner.scan,
@@ -74,6 +88,22 @@ module.exports = {
   tfidfThreatScore,
   tokenEntropyAnomaly,
   structuralAnomalyScore,
+
+  // Wave10: Transport-layer defenses ("Your Agent Is Mine" paper)
+  checkPackageIntegrity: scanner.checkPackageIntegrity,
+  checkResponseConsistency: scanner.checkResponseConsistency,
+  logResponseHash: scanner.logResponseHash,
+  assessRouter: scanner.assessRouter,
+  detectYoloMode: scanner.detectYoloMode,
+  verifyProviderSignature: scanner.verifyProviderSignature,
+
+  // Direct module access (for advanced use)
+  packageIntegrity,
+  responseConsistency,
+  responseHashLog,
+  routerTrust,
+  yoloDetector,
+  providerSignature,
 
   // Utilities
   status,

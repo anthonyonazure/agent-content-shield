@@ -152,3 +152,55 @@ semantic:
     - bash_output
     - general
     - pdf_read
+
+# ── Wave10: Transport-Layer Defenses ───────────────────────────────
+# Based on "Your Agent Is Mine" (Liu et al., 2026) — defenses against
+# malicious LLM API routers that rewrite tool-call payloads.
+
+# AC-1.a: Package name integrity checking (typosquat detection)
+package_integrity:
+  enabled: true
+  # Maximum Levenshtein distance to flag as typosquat
+  max_distance: 2
+  # Custom allowlist file (packages that look like typosquats but are legitimate)
+  allowlist_file: "config/package-allowlist.json"
+
+# AC-1.b: Response consistency monitoring (session drift detection)
+response_consistency:
+  enabled: true
+  # Minimum responses before drift detection activates
+  warm_up: 5
+  # CUSUM threshold for drift alert
+  drift_threshold: 0.6
+
+# Append-only response hash log (forensic transparency)
+response_hash_log:
+  enabled: true
+  # Max log size before rotation (bytes)
+  max_size: 52428800  # 50MB
+  # Number of rotated files to keep
+  max_rotated: 10
+
+# Router trust scoring
+router_trust:
+  enabled: true
+  # Trust score below which router is auto-blocked
+  block_threshold: 0.1
+  # Alert when non-first-party router detected
+  warn_on_proxy: true
+
+# YOLO mode detection
+yolo_detection:
+  enabled: true
+  # Automatically elevate sensitivity in YOLO mode
+  auto_elevate: true
+  # Block threshold modifier in YOLO mode (negative = more aggressive)
+  severity_modifier: -2
+
+# Provider signature verification (stub — no providers support this yet)
+provider_signature:
+  enabled: true
+  # When true, warn on unsigned responses (once providers support signing)
+  warn_unsigned: false
+  # When true, block unsigned responses (future — when signing is widespread)
+  require_signature: false

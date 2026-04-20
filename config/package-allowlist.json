@@ -1,0 +1,5 @@
+[
+  "# Custom package allowlist — packages that look like typosquats but are legitimate",
+  "# Add package names here (one per line) to suppress false positives",
+  "# Example: a private package named 'requtils' would trigger on distance from 'requests'"
+]
