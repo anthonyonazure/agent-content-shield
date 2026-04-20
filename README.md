@@ -19,7 +19,7 @@ Content In
     |
     v
 [Layer 1: Regex + Heuristics]  <5ms
-    |  500+ patterns, 23 languages, 40+ semantic heuristics
+    |  500+ patterns, 61 curated languages, 40+ semantic heuristics
     |  Catches: direct injection, role hijacking, credential access,
     |  system boundary faking, SSRF, hidden content, encoding tricks
     |
@@ -60,7 +60,7 @@ Only content that passes Layer 1 reaches Layer 2. Only borderline Layer 2 cases 
 
 **Infrastructure** -- SSRF (localhost, metadata endpoints, decimal/hex/octal IPs), blocked exfiltration domains (webhook.site, requestbin, ngrok, etc.), DNS rebinding patterns
 
-**Multilingual** -- injection patterns in 23 languages (Spanish, French, German, Chinese, Russian, Japanese, Korean, Arabic, Hindi, and more)
+**Multilingual** -- curated injection regex for 61 languages: Amharic, Arabic, Basque, Bengali, Bulgarian, Burmese, Catalan, Chinese, Croatian, Czech, Danish, Dutch, Esperanto, Farsi/Persian, Finnish, French, Galician, Georgian, German, Greek, Gujarati, Hausa, Hebrew, Hindi, Hungarian, Igbo, Indonesian, Japanese, Kannada, Kazakh, Khmer, Korean, Lao, Malayalam, Marathi, Mongolian, Nepali, Norwegian, Pashto, Polish, Portuguese, Punjabi, Romanian, Russian, Sinhala, Slovak, Spanish, Swahili, Swedish, Tagalog, Tamil, Telugu, Thai, Tibetan, Turkish, Ukrainian, Urdu, Uzbek, Vietnamese, Yoruba. Languages *without* curated regex fall through to the semantic embedding + NLI intent layers, which are vocabulary-independent by design — so an attack in Icelandic, Welsh, or Javanese still trips Layer 2/3/4 via intent rather than keyword.
 
 **Memory Poisoning** -- behavioral override attempts, internal file reference probing (`.env`, `CLAUDE.md`, `settings.json`)
 
@@ -86,33 +86,44 @@ Before any detection runs, content goes through:
 - **Bash monitoring is new and pattern-based.** The `pre-bash` hook (v0.3.0) scans commands before execution for exfiltration, reverse shells, sensitive file access, and rogue script execution. It's regex-based, so novel obfuscation may evade it.
 - **It's not production-hardened for high-throughput.** Designed for developer workstation use (single agent, moderate request volume). Not benchmarked for thousands of concurrent scans.
 - **Cross-temporal analysis is limited.** It scans content per-source. Benign fragments that reconstitute as attacks across multiple sources or sessions are not yet detected.
-- **Python parity is incomplete.** The Python detector (`core/detectors.py`) lacks the Wave 2-5 Unicode defenses that the JavaScript engine has.
+- **Python port caveats.** v0.4.1 closed the module-level gap: `core/post_flight.py`, `core/escalation_tracker.py`, `core/canary.py`, `core/behavioral_engine.py`, `core/semantic_detector.py`, and `core/nli_classifier.py` are all at behavior parity with their JS counterparts, and both ports share the same lexicons via `core/semantic-lexicon.json` + `core/nli-intents.json`. The one remaining gap is the Wave 2-5 Unicode preprocessing in `core/detectors.py` — the JS detector's homoglyph translation and encoding-decode chains are more complete. Track for a future release.
 
 ## Architecture
 
 ```
 agent-content-shield/
   core/
-    detectors.js          # Main regex + heuristic engine (Layer 1)
-    semantic-detector.js   # Embedding + LLM classifier (Layers 2-3)
-    nli-classifier.js      # NLI intent classifier (Layer 4, opt-in)
-    signatures.json        # Threat pattern library (500+ patterns)
-    detectors.py           # Python equivalent (partial parity)
+    detectors.{js,py}           # Main regex + heuristic engine (Layer 1; Python port is partial)
+    semantic-detector.{js,py}   # Embedding + LLM classifier orchestrator (Layers 2-3)
+    nli-classifier.{js,py}      # NLI intent classifier (Layer 4, opt-in)
+    post-flight.{js,py}         # Post-flight output scanner (v0.4.0)
+    escalation-tracker.{js,py}  # Multi-turn escalation tracking (v0.4.0)
+    behavioral-engine.{js,py}   # Markov tool-sequence anomaly detector
+    canary.{js,py}              # 128-bit canary token tripwire
+    signatures.json             # Threat pattern library (500+ patterns)
+    semantic-lexicon.json       # Shared: 106 injection seeds + 240 IDF terms
+    nli-intents.json            # Shared: 8-intent threat taxonomy + system prompt
   adapters/
     claude-code/
-      hooks.js             # Claude Code PreToolUse/PostToolUse hooks
-    mcp-middleware/         # MCP protocol adapter
+      hooks.js                  # Claude Code PreToolUse/PostToolUse hooks
+      post-flight-hook.js       # Claude Code Stop/SubagentStop hook (v0.4.0)
+    python_middleware/          # Python decorator + async context manager
+    mcp-middleware/              # MCP protocol adapter
     stdin-pipe/
-      scan.js              # Universal pipe adapter
+      scan.js                   # Universal pipe adapter
   cli/
-    shield.js              # CLI commands (scan, scan-dir, validate-url)
+    shield.js                   # CLI commands (scan, scan-dir, validate-url)
   config/
-    default.yaml           # Thresholds, trusted/blocked domains, tool mappings
+    default.yaml                # Thresholds, trusted/blocked domains, tool mappings
   test/
-    detectors.test.js      # Core detector tests (50+ cases)
-    semantic.test.js       # Semantic layer tests
-    run.js                 # Test orchestrator
-  logs/                    # Detection logs (JSONL)
+    detectors.test.js           # Core detector tests (50+ cases)
+    semantic.test.js            # Semantic layer tests (needs Ollama)
+    post-flight.test.js         # Post-flight scanner tests
+    escalation-tracker.test.js  # Escalation tracking tests
+    shared-lexicon.test.js      # Drift guard: JS must match shared JSON (v0.4.2)
+    test_*.py                   # Python mirrors of all the above (105 tests total)
+    run.js                      # JS test orchestrator
+  logs/                         # Detection logs (JSONL)
 ```
 
 ## Requirements
@@ -279,12 +290,11 @@ Notable attack chains discovered:
 
 ### Open Vulnerabilities
 - **Ollama has no authentication** -- port squatting risk mitigated by model integrity checks (v0.3.0) but not fully solved
-- **50+ languages uncovered** -- multilingual detection covers 23 of 70+ languages (expansion in progress)
 
 ### What Would Make It Better
 - **Ollama mTLS or API key auth** to prevent port squatting
 - **Image analysis pipeline** -- vision model to detect steganographic injection
-- **Broader multilingual coverage** -- expand from 23 to 70+ languages
+- **Long-tail language coverage** -- 61 languages have curated injection regex today. Expanding to the remaining top-100 (Icelandic, Welsh, Afrikaans, Kurdish, Javanese, Cebuano, Quechua, and others) is low marginal value because the semantic + NLI layers already catch those attacks intent-first, but it would tighten the offline-only path
 - **Embedding ensemble** -- two embedding models to resist adversarial suffix attacks
 - **Statistical gate hardening** -- remove the score < 0.15 fast-path that allows semantic bypass
 - **Metrics dashboard** -- visualize detection logs, false positive rates, latency percentiles
