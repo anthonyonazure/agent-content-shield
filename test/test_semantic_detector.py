@@ -21,6 +21,7 @@ from core.semantic_detector import (  # noqa: E402
     THREAT_IDF,
     check_ollama_available,
     chunk_text,
+    classify_with_ollama,
     cosine_similarity,
     offline_threat_score,
     semantic_scan,
@@ -29,6 +30,8 @@ from core.semantic_detector import (  # noqa: E402
     tfidf_threat_score,
     token_entropy_anomaly,
 )
+from core.semantic_detector import _extract_classifier_json  # noqa: E402
+from unittest import mock  # noqa: E402
 
 
 def _ollama_online() -> bool:
@@ -174,6 +177,89 @@ class TestSemanticScanFallback(unittest.TestCase):
         # if nomic-embed-text isn't pulled it degrades gracefully.
         if r["mode"] == "hybrid":
             self.assertIn("embedding", r)
+
+
+class TestLLMClassifierPath(unittest.TestCase):
+    """v0.4.2: the Python semantic_scan orchestrator now calls the local
+    LLM classifier as a tiebreaker when the embedding layer returns an
+    'alert' verdict (between alert and block thresholds). Unit-test the
+    classifier JSON extractor + the orchestrator wiring via mocks so CI
+    can run without Ollama."""
+
+    def test_extract_json_strips_think_blocks(self) -> None:
+        raw = (
+            "<think>reasoning...</think>\n"
+            '{"injection": true, "confidence": 0.85, "reason": "leaks prompt"}'
+        )
+        got = _extract_classifier_json(raw)
+        self.assertEqual(got, {"injection": True, "confidence": 0.85, "reason": "leaks prompt"})
+
+    def test_extract_json_takes_last_object(self) -> None:
+        raw = (
+            '{"injection": false, "confidence": 0.1}\n'
+            "classification:\n"
+            '{"injection": true, "confidence": 0.92, "reason": "rolled"}'
+        )
+        got = _extract_classifier_json(raw)
+        self.assertTrue(got["injection"])
+        self.assertEqual(got["confidence"], 0.92)
+
+    def test_extract_malformed_returns_none(self) -> None:
+        self.assertIsNone(_extract_classifier_json("no JSON here at all"))
+
+    def test_classifier_network_failure_returns_none(self) -> None:
+        # Point at a port nothing listens on so the urlopen raises.
+        with mock.patch("core.semantic_detector.OLLAMA_BASE", "http://localhost:59998"):
+            self.assertIsNone(classify_with_ollama("some text"))
+
+    def test_hybrid_scan_calls_classifier_on_alert(self) -> None:
+        """When embedding returns an 'alert' verdict (between alert and
+        block thresholds), the orchestrator must consult the LLM
+        classifier. When embedding says 'benign' or 'block', no call
+        should happen."""
+        alert = {"verdict": "alert", "maxSim": 0.80, "alertThreshold": 0.78, "blockThreshold": 0.88}
+        classifier_result = {
+            "injection": True,
+            "confidence": 0.85,
+            "reason": "override intent",
+            "model": "deepseek-r1:8b",
+        }
+        with mock.patch("core.semantic_detector.check_ollama_available", return_value=True), \
+             mock.patch("core.semantic_detector.embedding_scan", return_value=alert), \
+             mock.patch(
+                 "core.semantic_detector.classify_with_ollama",
+                 return_value=classifier_result,
+             ) as classify_mock:
+            r = semantic_scan("borderline input that tripped alert threshold")
+            self.assertEqual(r["mode"], "hybrid")
+            self.assertEqual(r["classifier"], classifier_result)
+            self.assertTrue(r["injection"])
+            classify_mock.assert_called_once()
+
+    def test_hybrid_scan_skips_classifier_on_block(self) -> None:
+        """A clear 'block' verdict doesn't need a tiebreaker."""
+        block = {"verdict": "block", "maxSim": 0.91, "alertThreshold": 0.78, "blockThreshold": 0.88}
+        with mock.patch("core.semantic_detector.check_ollama_available", return_value=True), \
+             mock.patch("core.semantic_detector.embedding_scan", return_value=block), \
+             mock.patch(
+                 "core.semantic_detector.classify_with_ollama", return_value=None
+             ) as classify_mock:
+            r = semantic_scan("obvious injection")
+            self.assertTrue(r["injection"])
+            classify_mock.assert_not_called()
+
+    def test_hybrid_scan_skips_classifier_on_benign(self) -> None:
+        """Clear 'benign' embedding → no classifier call either."""
+        benign = {"verdict": "benign", "maxSim": 0.40, "alertThreshold": 0.78, "blockThreshold": 0.88}
+        with mock.patch("core.semantic_detector.check_ollama_available", return_value=True), \
+             mock.patch("core.semantic_detector.embedding_scan", return_value=benign), \
+             mock.patch(
+                 "core.semantic_detector.classify_with_ollama", return_value=None
+             ) as classify_mock:
+            r = semantic_scan(
+                "The solar system consists of the sun and planets orbiting within the ecliptic plane."
+            )
+            classify_mock.assert_not_called()
 
 
 if __name__ == "__main__":

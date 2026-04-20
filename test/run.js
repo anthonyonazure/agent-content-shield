@@ -37,9 +37,11 @@ try {
 
 // v0.4.0 suites use a custom lightweight runner (assert + console.log)
 // rather than node:test. Invoke them sequentially after the node:test pass.
+// v0.4.2 added the shared-lexicon drift check here.
 const standaloneSuites = [
   path.join(__dirname, 'post-flight.test.js'),
   path.join(__dirname, 'escalation-tracker.test.js'),
+  path.join(__dirname, 'shared-lexicon.test.js'),
 ];
 for (const suite of standaloneSuites) {
   console.log(`\n[i] Running ${path.basename(suite)}`);
