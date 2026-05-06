@@ -319,4 +319,4 @@ MIT
 
 ## Author
 
-Anthony Clendenen -- [@anthonyonazure](https://github.com/anthonyonazure)
+[@anthonyonazure](https://github.com/anthonyonazure)

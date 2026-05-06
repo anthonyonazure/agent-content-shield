@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-05
 **Classification**: AUTHORIZED DEFENSIVE SECURITY RESEARCH
-**Commissioned by**: Anthony Clendenen (system owner)
+**Commissioned by**: anthonyonazure (system owner)
 **Framework**: Google DeepMind "AI Agent Traps" (Franklin et al., 2026)
 
 ## Executive Summary
